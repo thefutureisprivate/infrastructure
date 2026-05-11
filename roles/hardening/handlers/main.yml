@@ -1,0 +1,28 @@
+---
+- name: 'Restart chronyd'
+  ansible.builtin.systemd:
+    name: 'chronyd'
+    state: 'restarted'
+    enabled: true
+    daemon_reload: true
+
+- name: 'Reload sshd units'
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: 'Restart NetworkManager'
+  ansible.builtin.systemd:
+    name: 'NetworkManager.service'
+    state: 'restarted'
+    daemon_reload: true
+
+- name: 'Reload udev rules'
+  ansible.builtin.command:
+    argv:
+      - 'udevadm'
+      - 'control'
+      - '--reload-rules'
+  changed_when: false
+
+- name: 'Reboot'
+  ansible.builtin.reboot: {}

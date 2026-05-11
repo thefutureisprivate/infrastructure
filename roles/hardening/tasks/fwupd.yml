@@ -1,0 +1,23 @@
+---
+- name: 'Install fwupd'
+  ansible.builtin.package:
+    name: 'fwupd'
+    state: 'present'
+
+- name: 'Set UriSchemes=file;https in fwupd.conf'
+  community.general.ini_file:
+    path: '/etc/fwupd/fwupd.conf'
+    section: 'fwupd'
+    option: 'UriSchemes'
+    value: 'file;https'
+    no_extra_spaces: true
+    create: true
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+
+- name: 'Enable and start fwupd-refresh.timer'
+  ansible.builtin.systemd:
+    name: 'fwupd-refresh.timer'
+    state: 'started'
+    enabled: true

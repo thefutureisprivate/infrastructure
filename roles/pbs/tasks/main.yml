@@ -1,0 +1,22 @@
+---
+- name: 'Install Proxmox Backup Server'
+  ansible.builtin.import_tasks: 'install.yml'
+  tags:
+    - 'pbs'
+
+- name: 'Prepare PBS hardening compatibility'
+  ansible.builtin.import_tasks: 'hardening.yml'
+  tags:
+    - 'hardening'
+
+- name: 'Run hardening role'
+  ansible.builtin.include_role:
+    name: 'hardening'
+    apply:
+      tags:
+        - 'hardening'
+  vars:
+    hardening_ssh_service_unit: 'ssh.service'
+    hardening_ssh_socket_unit: 'ssh.socket'
+  tags:
+    - 'hardening'

@@ -1,0 +1,6 @@
+---
+profile: 'production'
+strict: true
+offline: true
+use_default_rules: true
+warn_list: []

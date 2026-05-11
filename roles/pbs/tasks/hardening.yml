@@ -1,0 +1,26 @@
+---
+- name: 'Create Debian chrony configuration directory'
+  ansible.builtin.file:
+    path: '/etc/chrony/conf.d'
+    state: 'directory'
+    owner: 'root'
+    group: 'root'
+    mode: '0755'
+
+- name: 'Link hardening chrony drop-in for Debian'
+  ansible.builtin.file:
+    src: '/etc/chrony.d/10-custom.conf'
+    dest: '/etc/chrony/conf.d/10-custom.conf'
+    state: 'link'
+    force: true
+    follow: false
+  notify: 'Restart chrony'
+
+- name: 'Link hardening chrony options for Debian'
+  ansible.builtin.file:
+    src: '/etc/sysconfig/chronyd'
+    dest: '/etc/default/chrony'
+    state: 'link'
+    force: true
+    follow: false
+  notify: 'Restart chrony'

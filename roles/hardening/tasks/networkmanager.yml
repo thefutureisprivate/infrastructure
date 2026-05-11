@@ -1,0 +1,49 @@
+---
+- name: 'NetworkManager override'
+  block:
+    - name: 'Create /etc/systemd/system/NetworkManager.service.d'
+      ansible.builtin.file:
+        path: '/etc/systemd/system/NetworkManager.service.d'
+        state: 'directory'
+        owner: 'root'
+        group: 'root'
+        mode: '0755'
+
+    - name: 'Copy override for NetworkManager'
+      ansible.builtin.copy:
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
+        src: 'networkmanager-override.conf'
+        dest: '/etc/systemd/system/NetworkManager.service.d/override.conf'
+      notify: 'Restart NetworkManager'
+
+- name: 'Configure NetworkManager privacy enhancements'
+  when: '''desktops'' in group_names'
+  block:
+    - name: 'Copy macrandomize config for NetworkManager'
+      ansible.builtin.copy:
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
+        src: 'networkmanager-macrandomize.conf'
+        dest: '/etc/NetworkManager/conf.d/00-macrandomize.conf'
+      notify: 'Restart NetworkManager'
+
+    - name: 'Copy transient hostname config for NetworkManager'
+      ansible.builtin.copy:
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
+        src: 'networkmanager-transient-hostname.conf'
+        dest: '/etc/NetworkManager/conf.d/01-transient-hostname.conf'
+      notify: 'Restart NetworkManager'
+
+    - name: 'Copy IPv6 privacy config for NetworkManager'
+      ansible.builtin.copy:
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
+        src: 'networkmanager-ipv6-privacy.conf'
+        dest: '/etc/NetworkManager/conf.d/40-ipv6-privacy.conf'
+      notify: 'Restart NetworkManager'

@@ -1,0 +1,67 @@
+---
+- name: 'Create /etc/chrony.d/'
+  ansible.builtin.file:
+    path: '/etc/chrony.d/'
+    state: 'directory'
+    owner: 'root'
+    group: 'root'
+    mode: '0755'
+
+- name: 'Copy drop-in chrony configuration file'
+  ansible.builtin.copy:
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+    src: 'chronyd-custom.conf'
+    dest: '/etc/chrony.d/10-custom.conf'
+  notify:
+    - 'Restart chronyd'
+
+- name: 'Configure chronyd command-line options'
+  block:
+    - name: 'Create /etc/sysconfig'
+      ansible.builtin.file:
+        path: '/etc/sysconfig'
+        state: 'directory'
+        owner: 'root'
+        group: 'root'
+        mode: '0755'
+
+    - name: 'Copy chronyd command-line options'
+      ansible.builtin.copy:
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
+        dest: '/etc/sysconfig/chronyd'
+        content: |
+          OPTIONS="-F1 -r"
+          DAEMON_OPTS="-F 1 -r"
+      notify:
+        - 'Restart chronyd'
+
+- name: 'Configure chronyd service override'
+  block:
+    - name: 'Create /etc/systemd/system/chronyd.service.d/'
+      ansible.builtin.file:
+        path: '/etc/systemd/system/chronyd.service.d/'
+        state: 'directory'
+        owner: 'root'
+        group: 'root'
+        mode: '0755'
+
+    - name: 'Copy chronyd override'
+      ansible.builtin.copy:
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
+        src: 'chronyd-override.conf'
+        dest: '/etc/systemd/system/chronyd.service.d/override.conf'
+      notify: 'Restart chronyd'
+
+- name: 'Configure chronyd state cleanup'
+  ansible.builtin.copy:
+    owner: 'root'
+    group: 'root'
+    mode: '0644'
+    dest: '/etc/tmpfiles.d/chronyd.conf'
+    content: 'd /var/lib/chrony 0755 chrony chrony 30d'

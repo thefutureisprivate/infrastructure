@@ -1,0 +1,5 @@
+# Sourced from secureblue/secureblue
+# Source: https://github.com/secureblue/secureblue/blob/live/files/system/usr/lib/udev/rules.d/99-secureblue.rules
+# License: https://github.com/secureblue/secureblue/blob/live/LICENSE
+
+ACTION=="add", SUBSYSTEM=="module", DEVPATH=="/module/binfmt_misc", RUN+="/usr/bin/sysctl -w fs.binfmt_misc.status=0"

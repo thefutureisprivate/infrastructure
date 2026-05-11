@@ -1,0 +1,72 @@
+---
+- name: 'Disable coredumps in /etc/security'
+  block:
+    - name: 'Create /etc/security/limits.d'
+      ansible.builtin.file:
+        dest: '/etc/security/limits.d'
+        state: 'directory'
+        owner: 'root'
+        group: 'root'
+        mode: '0755'
+
+    - name: 'Disable coredumps in /etc/security'
+      ansible.builtin.copy:
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
+        src: 'coredump-limits.conf'
+        dest: '/etc/security/limits.d/30-disable-coredump.conf'
+
+- name: 'Disable coredumps in systemd'
+  block:
+    - name: 'Create /etc/systemd/coredump.conf.d'
+      ansible.builtin.file:
+        dest: '/etc/systemd/coredump.conf.d'
+        state: 'directory'
+        owner: 'root'
+        group: 'root'
+        mode: '0755'
+
+    - name: 'Copy coredump override config file'
+      ansible.builtin.copy:
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
+        src: 'coredump-disable.conf'
+        dest: '/etc/systemd/coredump.conf.d/disable.conf'
+
+- name: 'Disable systemd manager core dumps'
+  block:
+    - name: 'Create /etc/systemd/system.conf.d'
+      ansible.builtin.file:
+        dest: '/etc/systemd/system.conf.d'
+        state: 'directory'
+        owner: 'root'
+        group: 'root'
+        mode: '0755'
+
+    - name: 'Create /etc/systemd/user.conf.d'
+      ansible.builtin.file:
+        dest: '/etc/systemd/user.conf.d'
+        state: 'directory'
+        owner: 'root'
+        group: 'root'
+        mode: '0755'
+
+    - name: 'Copy systemd manager coredump override'
+      ansible.builtin.copy:
+        owner: 'root'
+        group: 'root'
+        mode: '0644'
+        src: 'systemd-manager-disable-coredump.conf'
+        dest: '{{ item }}'
+      loop:
+        - '/etc/systemd/system.conf.d/60-disable-coredump.conf'
+        - '/etc/systemd/user.conf.d/60-disable-coredump.conf'
+
+- name: 'Mask kdump.service'
+  ansible.builtin.systemd:
+    name: 'kdump.service'
+    enabled: false
+    masked: true
+  when: '''kdump.service'' in ansible_facts.services'

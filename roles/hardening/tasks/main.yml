@@ -1,0 +1,31 @@
+---
+- name: 'Collect service facts'
+  ansible.builtin.service_facts: {}
+
+- name: 'Configure chronyd'
+  ansible.builtin.import_tasks: 'chrony.yml'
+
+- name: 'Include coredump hardening tasks'
+  ansible.builtin.include_tasks: 'coredump.yml'
+
+- name: 'Include fwupd hardening tasks'
+  ansible.builtin.include_tasks: 'fwupd.yml'
+  when: 'ansible_facts[''virtualization_role''] == ''host'''
+
+- name: 'Include kernel hardening tasks'
+  ansible.builtin.include_tasks: 'kernel.yml'
+
+- name: 'Include NetworkManager hardening tasks'
+  ansible.builtin.include_tasks: 'networkmanager.yml'
+  when:
+    - '''NetworkManager.service'' in ansible_facts.services'
+    - 'ansible_facts.services[''NetworkManager.service''].state == ''running'''
+
+- name: 'Configure sshd'
+  ansible.builtin.import_tasks: 'ssh.yml'
+
+- name: 'Mask debug-shell.service'
+  ansible.builtin.systemd:
+    name: 'debug-shell.service'
+    enabled: false
+    masked: true
