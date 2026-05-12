@@ -1,8 +1,8 @@
 ---
-- 'name': 'Setup Proxmox Virtual Environment'
-  'hosts': 'pve'
-  'become': true
-  'tasks':
-    - 'name': 'Set hostname to inventory hostname'
-      'ansible.builtin.hostname':
-        'name': '{{ inventory_hostname }}'
+- name: 'Setup Proxmox Virtual Environment'
+  hosts: 'pve'
+  become: true
+  tasks:
+    - name: 'Set hostname to inventory hostname'
+      ansible.builtin.hostname:
+        name: '{{ inventory_hostname }}'

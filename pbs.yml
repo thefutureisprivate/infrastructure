@@ -1,11 +1,11 @@
 ---
-- 'name': 'Setup Proxmox Backup Servers'
-  'hosts': 'pbs'
-  'become': true
-  'tasks':
-    - 'name': 'Set hostname to inventory hostname'
-      'ansible.builtin.hostname':
-        'name': '{{ inventory_hostname }}'
+- name: 'Setup Proxmox Backup Servers'
+  hosts: 'pbs'
+  become: true
+  tasks:
+    - name: 'Set hostname to inventory hostname'
+      ansible.builtin.hostname:
+        name: '{{ inventory_hostname }}'
 
     - name: 'Run pbs role'
       ansible.builtin.include_role:

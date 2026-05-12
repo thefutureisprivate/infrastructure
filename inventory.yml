@@ -1,21 +1,21 @@
 ---
-'all':
-  'children':
+all:
+  children:
     servers:
       children:
-        'pve':
-          'hosts':
-            'pve1':
-              'ansible_user': 'root'
-              'ansible_host': 'pve1.thefutureisprivate.dev'
-        'pbs':
-          'hosts':
-            'pbs1':
-              'ansible_user': 'root'
-              'ansible_host': 'pbs1.thefutureisprivate.dev'
-        'vm':
-          'hosts': {}
-    'desktops':
-      'hosts':
-        'localhost':
-          'ansible_connection': 'local'
+        pve:
+          hosts:
+            pve1:
+              ansible_user: 'root'
+              ansible_host: 'pve1.thefutureisprivate.dev'
+        pbs:
+          hosts:
+            pbs1:
+              ansible_user: 'root'
+              ansible_host: 'pbs1.thefutureisprivate.dev'
+        vm:
+          hosts: {}
+    desktops:
+      hosts:
+        localhost:
+          ansible_connection: 'local'
