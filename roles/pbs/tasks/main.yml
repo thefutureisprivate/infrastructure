@@ -4,6 +4,12 @@
   tags:
     - 'pbs'
 
+- name: 'Configure Proxmox Backup Server datastore'
+  ansible.builtin.import_tasks: 'datastore.yml'
+  tags:
+    - 'pbs'
+    - 'datastore'
+
 - name: 'Prepare PBS hardening compatibility'
   ansible.builtin.import_tasks: 'hardening.yml'
   tags:

@@ -1,0 +1,332 @@
+---
+- name: 'List PBS S3 endpoints'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 's3'
+      - 'endpoint'
+      - 'list'
+      - '--output-format'
+      - 'json'
+  register: 'pbs_s3_endpoint_list_result'
+  changed_when: false
+
+- name: 'Parse PBS S3 endpoints'
+  ansible.builtin.set_fact:
+    pbs_s3_endpoint_list: '{{ pbs_s3_endpoint_list_result.stdout | from_json }}'
+
+- name: 'Find PBS S3 endpoint'
+  ansible.builtin.set_fact:
+    pbs_s3_endpoint_matches: "{{
+        (pbs_s3_endpoint_list
+          | selectattr('id', 'defined')
+          | selectattr('id', 'equalto', pbs_s3_endpoint_id)
+          | list)
+        +
+        (pbs_s3_endpoint_list
+          | selectattr('name', 'defined')
+          | selectattr('name', 'equalto', pbs_s3_endpoint_id)
+          | list)
+      }}"
+
+- name: 'Create PBS S3 endpoint'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 's3'
+      - 'endpoint'
+      - 'create'
+      - '{{ pbs_s3_endpoint_id }}'
+      - '--access-key'
+      - '{{ pbs_s3_access_key }}'
+      - '--secret-key'
+      - '{{ pbs_s3_secret_key }}'
+      - '--endpoint'
+      - '{{ pbs_s3_endpoint }}'
+      - '--region'
+      - '{{ pbs_s3_region }}'
+  changed_when: true
+  no_log: true
+  when: 'pbs_s3_endpoint_matches | length == 0'
+
+- name: 'Create PBS S3 datastore cache directory'
+  ansible.builtin.file:
+    path: '{{ pbs_s3_datastore_cache_path }}'
+    state: 'directory'
+    owner: 'backup'
+    group: 'backup'
+    mode: '0750'
+
+- name: 'List PBS datastores'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'datastore'
+      - 'list'
+      - '--output-format'
+      - 'json'
+  register: 'pbs_datastore_list_result'
+  changed_when: false
+
+- name: 'Parse PBS datastores'
+  ansible.builtin.set_fact:
+    pbs_datastore_list: '{{ pbs_datastore_list_result.stdout | from_json }}'
+
+- name: 'Find PBS S3 datastore'
+  ansible.builtin.set_fact:
+    pbs_s3_datastore_matches: "{{
+        (pbs_datastore_list
+          | selectattr('name', 'defined')
+          | selectattr('name', 'equalto', pbs_s3_datastore_name)
+          | list)
+        +
+        (pbs_datastore_list
+          | selectattr('store', 'defined')
+          | selectattr('store', 'equalto', pbs_s3_datastore_name)
+          | list)
+      }}"
+
+- name: 'Build PBS S3 datastore creation command'
+  ansible.builtin.set_fact:
+    pbs_s3_datastore_create_argv: "{{
+        ['proxmox-backup-manager',
+          'datastore',
+          'create',
+          pbs_s3_datastore_name,
+          pbs_s3_datastore_cache_path,
+          '--backend',
+          'type=s3,client=' ~ pbs_s3_endpoint_id ~ ',bucket=' ~ pbs_s3_datastore_bucket]
+        + (['--reuse-datastore', 'true'] if pbs_s3_datastore_reuse else [])
+        + (['--overwrite-in-use', 'true'] if pbs_s3_datastore_overwrite_in_use else [])
+      }}"
+
+- name: 'Create PBS S3 datastore'
+  ansible.builtin.command:
+    argv: '{{ pbs_s3_datastore_create_argv }}'
+  changed_when: true
+  when: 'pbs_s3_datastore_matches | length == 0'
+
+- name: 'Assert PBS S3 datastore retention variables are supported'
+  ansible.builtin.assert:
+    that:
+      - 'pbs_s3_datastore_retention is mapping'
+      - 'pbs_s3_datastore_retention.keys() | list | difference(pbs_retention_keys) | length == 0'
+    fail_msg: 'Use only supported PBS retention keys in pbs_s3_datastore_retention.'
+  vars:
+    pbs_retention_keys:
+      - 'keep-last'
+      - 'keep-hourly'
+      - 'keep-daily'
+      - 'keep-weekly'
+      - 'keep-monthly'
+      - 'keep-yearly'
+
+- name: 'Show PBS S3 datastore configuration'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'datastore'
+      - 'show'
+      - '{{ pbs_s3_datastore_name }}'
+      - '--output-format'
+      - 'json'
+  register: 'pbs_s3_datastore_show_result'
+  changed_when: false
+
+- name: 'Parse PBS S3 datastore configuration'
+  ansible.builtin.set_fact:
+    pbs_s3_datastore_config: '{{ pbs_s3_datastore_show_result.stdout | from_json }}'
+
+- name: 'Initialize PBS S3 datastore policy update command'
+  ansible.builtin.set_fact:
+    pbs_s3_datastore_policy_update_argv:
+      - 'proxmox-backup-manager'
+      - 'datastore'
+      - 'update'
+      - '{{ pbs_s3_datastore_name }}'
+    pbs_s3_datastore_policy_update_needed: false
+
+- name: 'Add PBS S3 datastore garbage collection schedule update'
+  ansible.builtin.set_fact:
+    pbs_s3_datastore_policy_update_argv: "{{
+        pbs_s3_datastore_policy_update_argv
+        + ['--gc-schedule', pbs_s3_datastore_gc_schedule]
+      }}"
+    pbs_s3_datastore_policy_update_needed: true
+  when: "
+    (pbs_s3_datastore_config['gc-schedule'] | default(''))
+    != pbs_s3_datastore_gc_schedule
+    "
+
+- name: 'Add PBS S3 datastore prune schedule update'
+  ansible.builtin.set_fact:
+    pbs_s3_datastore_policy_update_argv: "{{
+        pbs_s3_datastore_policy_update_argv
+        + ['--prune-schedule', pbs_s3_datastore_prune_schedule]
+      }}"
+    pbs_s3_datastore_policy_update_needed: true
+  when: "
+    (pbs_s3_datastore_config['prune-schedule'] | default(''))
+    != pbs_s3_datastore_prune_schedule
+    "
+
+- name: 'Add PBS S3 datastore retention updates'
+  ansible.builtin.set_fact:
+    pbs_s3_datastore_policy_update_argv: "{{
+        pbs_s3_datastore_policy_update_argv
+        + ['--' ~ item.key, item.value | string]
+      }}"
+    pbs_s3_datastore_policy_update_needed: true
+  loop: '{{ pbs_s3_datastore_retention | dict2items }}'
+  when: "
+    (pbs_s3_datastore_config[item.key] | default('') | string)
+    != (item.value | string)
+    "
+
+- name: 'Update PBS S3 datastore policy'
+  ansible.builtin.command:
+    argv: '{{ pbs_s3_datastore_policy_update_argv }}'
+  changed_when: true
+  when: 'pbs_s3_datastore_policy_update_needed'
+
+- name: 'List PBS verification jobs'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'verify-job'
+      - 'list'
+      - '--output-format'
+      - 'json'
+  register: 'pbs_verify_job_list_result'
+  changed_when: false
+
+- name: 'Parse PBS verification jobs'
+  ansible.builtin.set_fact:
+    pbs_verify_job_list: '{{ pbs_verify_job_list_result.stdout | from_json }}'
+
+- name: 'Find PBS S3 verification job'
+  ansible.builtin.set_fact:
+    pbs_s3_verify_job_matches: "{{
+        (pbs_verify_job_list
+          | selectattr('id', 'defined')
+          | selectattr('id', 'equalto', pbs_s3_verify_job_id)
+          | list)
+        +
+        (pbs_verify_job_list
+          | selectattr('name', 'defined')
+          | selectattr('name', 'equalto', pbs_s3_verify_job_id)
+          | list)
+      }}"
+
+- name: 'Build PBS S3 verification job creation command'
+  ansible.builtin.set_fact:
+    pbs_s3_verify_job_create_argv: "{{
+        ['proxmox-backup-manager',
+          'verify-job',
+          'create',
+          pbs_s3_verify_job_id,
+          '--store',
+          pbs_s3_datastore_name,
+          '--schedule',
+          pbs_s3_verify_schedule,
+          '--ignore-verified',
+          pbs_s3_verify_ignore_verified | bool | ternary('true', 'false')]
+        +
+        (['--outdated-after', pbs_s3_verify_outdated_after | string]
+          if pbs_s3_verify_outdated_after is defined
+          else [])
+      }}"
+
+- name: 'Create PBS S3 verification job'
+  ansible.builtin.command:
+    argv: '{{ pbs_s3_verify_job_create_argv }}'
+  changed_when: true
+  when: 'pbs_s3_verify_job_matches | length == 0'
+
+- name: 'Show PBS S3 verification job'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'verify-job'
+      - 'show'
+      - '{{ pbs_s3_verify_job_id }}'
+      - '--output-format'
+      - 'json'
+  register: 'pbs_s3_verify_job_show_result'
+  changed_when: false
+  when: 'pbs_s3_verify_job_matches | length > 0'
+
+- name: 'Parse PBS S3 verification job'
+  ansible.builtin.set_fact:
+    pbs_s3_verify_job_config: '{{ pbs_s3_verify_job_show_result.stdout | from_json }}'
+  when: 'pbs_s3_verify_job_matches | length > 0'
+
+- name: 'Initialize PBS S3 verification job update command'
+  ansible.builtin.set_fact:
+    pbs_s3_verify_job_update_argv:
+      - 'proxmox-backup-manager'
+      - 'verify-job'
+      - 'update'
+      - '{{ pbs_s3_verify_job_id }}'
+    pbs_s3_verify_job_update_needed: false
+  when: 'pbs_s3_verify_job_matches | length > 0'
+
+- name: 'Add PBS S3 verification job store update'
+  ansible.builtin.set_fact:
+    pbs_s3_verify_job_update_argv: "{{
+        pbs_s3_verify_job_update_argv
+        + ['--store', pbs_s3_datastore_name]
+      }}"
+    pbs_s3_verify_job_update_needed: true
+  when:
+    - 'pbs_s3_verify_job_matches | length > 0'
+    - '(pbs_s3_verify_job_config[''store''] | default('''')) != pbs_s3_datastore_name'
+
+- name: 'Add PBS S3 verification job schedule update'
+  ansible.builtin.set_fact:
+    pbs_s3_verify_job_update_argv: "{{
+        pbs_s3_verify_job_update_argv
+        + ['--schedule', pbs_s3_verify_schedule]
+      }}"
+    pbs_s3_verify_job_update_needed: true
+  when:
+    - 'pbs_s3_verify_job_matches | length > 0'
+    - '(pbs_s3_verify_job_config[''schedule''] | default('''')) != pbs_s3_verify_schedule'
+
+- name: 'Add PBS S3 verification job ignore-verified update'
+  ansible.builtin.set_fact:
+    pbs_s3_verify_job_update_argv: "{{
+        pbs_s3_verify_job_update_argv
+        + ['--ignore-verified',
+          pbs_s3_verify_ignore_verified | bool | ternary('true', 'false')]
+      }}"
+    pbs_s3_verify_job_update_needed: true
+  when:
+    - 'pbs_s3_verify_job_matches | length > 0'
+    - "
+      (pbs_s3_verify_job_config['ignore-verified'] | default(true) | bool)
+      != (pbs_s3_verify_ignore_verified | bool)
+      "
+
+- name: 'Add PBS S3 verification job outdated-after update'
+  ansible.builtin.set_fact:
+    pbs_s3_verify_job_update_argv: "{{
+        pbs_s3_verify_job_update_argv
+        + ['--outdated-after', pbs_s3_verify_outdated_after | string]
+      }}"
+    pbs_s3_verify_job_update_needed: true
+  when:
+    - 'pbs_s3_verify_job_matches | length > 0'
+    - 'pbs_s3_verify_outdated_after is defined'
+    - "
+      (pbs_s3_verify_job_config['outdated-after'] | default('') | string)
+      != (pbs_s3_verify_outdated_after | string)
+      "
+
+- name: 'Update PBS S3 verification job'
+  ansible.builtin.command:
+    argv: '{{ pbs_s3_verify_job_update_argv }}'
+  changed_when: true
+  when:
+    - 'pbs_s3_verify_job_matches | length > 0'
+    - 'pbs_s3_verify_job_update_needed'

@@ -43,7 +43,6 @@ Follow the "A simple subset of yaml" guidance from <https://ruuda.nl/2023/the-ya
 - Store encrypted Ansible variable files as `*.sops.yml` or `*.sops.yaml` under `group_vars`, `host_vars`, or `secrets`.
 - Keep the Age private identity outside the repository and provide it with `SOPS_AGE_KEY_FILE`.
 - Never commit unencrypted `secrets.yml`, decrypted scratch files, or Age private keys.
-- Replace the placeholder Age recipient in `.sops.yaml` before creating encrypted secret files.
 
 ## Validation
 
