@@ -27,6 +27,7 @@ Follow the "A simple subset of yaml" guidance from <https://ruuda.nl/2023/the-ya
 
 ## Ansible Conventions
 
+- Install Ansible collection requirements with `ansible-galaxy collection install -r requirements.yml` when the local environment is missing collections.
 - Run `ansible-lint pbs.yml pve.yml roles/hardening roles/pbs` before committing Ansible changes. The repository `.ansible-lint` file enforces the production profile in strict mode.
 - Always use FQCN module names such as `ansible.builtin.copy`.
 - Every task must have a `name`.
@@ -36,10 +37,19 @@ Follow the "A simple subset of yaml" guidance from <https://ruuda.nl/2023/the-ya
 - Keep distro-specific compatibility in the target role when possible. For PBS/PVE/Debian compatibility, prefer `roles/pbs` or `roles/pve` over adding Debian branches to generic hardening tasks.
 - Preserve source and license references in copied config files.
 
+## Secrets
+
+- Use SOPS with Age for secrets.
+- Store encrypted Ansible variable files as `*.sops.yml` or `*.sops.yaml` under `group_vars`, `host_vars`, or `secrets`.
+- Keep the Age private identity outside the repository and provide it with `SOPS_AGE_KEY_FILE`.
+- Never commit unencrypted `secrets.yml`, decrypted scratch files, or Age private keys.
+- Replace the placeholder Age recipient in `.sops.yaml` before creating encrypted secret files.
+
 ## Validation
 
 Run the relevant checks after changes:
 
+- `ansible-galaxy collection install -r requirements.yml`
 - `yamllint .`
 - `ansible-lint pbs.yml pve.yml roles/hardening roles/pbs`
 - `ansible-playbook -i inventory.yml --syntax-check pbs.yml`

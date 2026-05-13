@@ -1,0 +1,23 @@
+# Local SOPS and Age material
+.sops-age-key.txt
+.sops-age-keys.txt
+age.key
+keys.txt
+
+# Decrypted secret scratch files
+*.decrypted.yml
+*.decrypted.yaml
+*.plain.yml
+*.plain.yaml
+*.unencrypted.yml
+*.unencrypted.yaml
+
+# Plain Ansible secret files
+group_vars/**/secrets.yml
+group_vars/**/secrets.yaml
+host_vars/**/secrets.yml
+host_vars/**/secrets.yaml
+secrets/**/*.yml
+secrets/**/*.yaml
+!secrets/**/*.sops.yml
+!secrets/**/*.sops.yaml
