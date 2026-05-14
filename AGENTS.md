@@ -9,6 +9,7 @@ This repository manages personal infrastructure with Ansible.
 - `pve.yml` configures Proxmox Virtual Environment hosts.
 - `roles/hardening` manages SSH, chrony, coredumps, fwupd, NetworkManager, sysctl, udev, and kernel hardening.
 - `roles/pbs` contains Debian/PBS compatibility tasks that must run before the hardening role on PBS hosts.
+- `roles/pve` contains PVE-specific storage and integration tasks.
 
 ## YAML Style
 
@@ -28,7 +29,7 @@ Follow the "A simple subset of yaml" guidance from <https://ruuda.nl/2023/the-ya
 ## Ansible Conventions
 
 - Install Ansible collection requirements with `ansible-galaxy collection install -r requirements.yml` when the local environment is missing collections.
-- Run `ansible-lint pbs.yml pve.yml roles/hardening roles/pbs` before committing Ansible changes. The repository `.ansible-lint` file enforces the production profile in strict mode.
+- Run `ansible-lint pbs.yml pve.yml roles/hardening roles/pbs roles/pve` before committing Ansible changes. The repository `.ansible-lint` file enforces the production profile in strict mode.
 - Always use FQCN module names such as `ansible.builtin.copy`.
 - Every task must have a `name`.
 - Every `command` or `shell` task must define `changed_when`, and add `failed_when` when the command can fail idempotently.
@@ -40,7 +41,7 @@ Follow the "A simple subset of yaml" guidance from <https://ruuda.nl/2023/the-ya
 ## Secrets
 
 - Use SOPS with Age for secrets.
-- Store encrypted Ansible variable files as `*.sops.yml` or `*.sops.yaml` under `group_vars`, `host_vars`, or `secrets`.
+- Store encrypted Ansible variable files as `*.sops.yml` or `*.sops.yaml` under `group_vars` or `host_vars`.
 - Keep the Age private identity outside the repository and provide it with `SOPS_AGE_KEY_FILE`.
 - Never commit unencrypted `secrets.yml`, decrypted scratch files, or Age private keys.
 
@@ -50,6 +51,6 @@ Run the relevant checks after changes:
 
 - `ansible-galaxy collection install -r requirements.yml`
 - `yamllint .`
-- `ansible-lint pbs.yml pve.yml roles/hardening roles/pbs`
+- `ansible-lint pbs.yml pve.yml roles/hardening roles/pbs roles/pve`
 - `ansible-playbook -i inventory.yml --syntax-check pbs.yml`
 - `ansible-playbook -i inventory.yml --syntax-check pve.yml`

@@ -1,0 +1,343 @@
+---
+- name: 'Set PVE PBS storage entry facts'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_id: '{{ pve_pbs_storage_host }}'
+    pve_pbs_storage_server: '{{ pve_pbs_storage_host }}'
+    pve_pbs_storage_datastore: 'backup'
+    pve_pbs_storage_content: 'backup'
+    pve_pbs_storage_username: 'backup@pbs!{{ inventory_hostname }}'
+    pve_pbs_storage_acl_path: '/datastore/backup'
+
+- name: 'Set PVE PBS storage server from inventory'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_server: '{{ hostvars[pve_pbs_storage_host].ansible_host }}'
+  when: 'hostvars[pve_pbs_storage_host].ansible_host is defined'
+
+- name: 'Read PBS certificate fingerprint'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'cert'
+      - 'info'
+  delegate_to: '{{ pve_pbs_storage_host }}'
+  register: 'pve_pbs_cert_info_result'
+  changed_when: false
+
+- name: 'Find PBS certificate fingerprint'
+  ansible.builtin.set_fact:
+    pve_pbs_fingerprint_match: '{{ cert_stdout | regex_findall(pve_pbs_fingerprint_re) }}'
+  vars:
+    cert_stdout: '{{ pve_pbs_cert_info_result.stdout }}'
+    pve_pbs_fingerprint_re: 'Fingerprint \(sha256\): ([A-Fa-f0-9:]+)'
+
+- name: 'Parse PBS certificate fingerprint'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_resolved_fingerprint: '{{ pve_pbs_fingerprint_match | first | default('''') }}'
+
+- name: 'Assert PBS certificate fingerprint is known'
+  ansible.builtin.assert:
+    that:
+      - 'pve_pbs_storage_resolved_fingerprint is defined'
+      - 'pve_pbs_storage_resolved_fingerprint | length > 0'
+    fail_msg: 'Could not parse PBS certificate fingerprint.'
+
+- name: 'Read PVE PBS storage configuration'
+  ansible.builtin.command:
+    argv:
+      - 'pvesh'
+      - 'get'
+      - '/storage/{{ pve_pbs_storage_id }}'
+      - '--output-format'
+      - 'json'
+  register: 'pve_pbs_storage_config_result'
+  changed_when: false
+  failed_when: false
+
+- name: 'Parse existing PVE PBS storage configuration'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_config: '{{ pve_pbs_storage_config_result.stdout | from_json }}'
+  when: 'pve_pbs_storage_config_result.rc == 0'
+
+- name: 'Initialize missing PVE PBS storage configuration'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_config: {}
+  when: 'pve_pbs_storage_config_result.rc != 0'
+
+- name: 'Fail when PVE storage ID is not PBS'
+  ansible.builtin.fail:
+    msg: 'Storage {{ pve_pbs_storage_id }} exists but is not a PBS storage.'
+  when:
+    - 'pve_pbs_storage_config_result.rc == 0'
+    - '(pve_pbs_storage_config.type | default('''')) != ''pbs'''
+
+- name: 'Initialize PVE PBS storage update state'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_update_needed: false
+    pve_pbs_storage_password_update_needed: false
+
+- name: 'Mark PVE PBS storage password update needed for creation'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_password_update_needed: true
+  when: 'pve_pbs_storage_config_result.rc != 0'
+
+- name: 'Mark PVE PBS storage server update needed'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_update_needed: true
+  when:
+    - 'pve_pbs_storage_config_result.rc == 0'
+    - '(pve_pbs_storage_config.server | default('''')) != pve_pbs_storage_server'
+
+- name: 'Mark PVE PBS storage datastore update needed'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_update_needed: true
+  when:
+    - 'pve_pbs_storage_config_result.rc == 0'
+    - '(pve_pbs_storage_config.datastore | default('''')) != pve_pbs_storage_datastore'
+
+- name: 'Mark PVE PBS storage username update needed'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_update_needed: true
+    pve_pbs_storage_password_update_needed: true
+  when:
+    - 'pve_pbs_storage_config_result.rc == 0'
+    - '(pve_pbs_storage_config.username | default('''')) != pve_pbs_storage_username'
+
+- name: 'Mark PVE PBS storage fingerprint update needed'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_update_needed: true
+  when:
+    - 'pve_pbs_storage_config_result.rc == 0'
+    - '
+      (pve_pbs_storage_config.fingerprint | default(''))
+      != pve_pbs_storage_resolved_fingerprint
+      '
+
+- name: 'Mark PVE PBS storage content update needed'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_update_needed: true
+  when:
+    - 'pve_pbs_storage_config_result.rc == 0'
+    - '(pve_pbs_storage_config.content | default('''')) != pve_pbs_storage_content'
+
+- name: 'List PBS users for PVE backup access'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'user'
+      - 'list'
+      - '--output-format'
+      - 'json'
+  delegate_to: '{{ pve_pbs_storage_host }}'
+  register: 'pve_pbs_user_list_result'
+  changed_when: false
+
+- name: 'Parse PBS users for PVE backup access'
+  ansible.builtin.set_fact:
+    pve_pbs_user_list: '{{ pve_pbs_user_list_result.stdout | from_json }}'
+
+- name: 'Build PBS user id list for PVE backup access'
+  ansible.builtin.set_fact:
+    pve_pbs_user_ids: '{{ pve_pbs_user_list | map(attribute=''userid'') | list }}'
+
+- name: 'Create PBS PVE backup user'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'user'
+      - 'create'
+      - 'backup@pbs'
+      - '--comment'
+      - 'Proxmox VE backup token owner'
+  delegate_to: '{{ pve_pbs_storage_host }}'
+  changed_when: true
+  when: '''backup@pbs'' not in pve_pbs_user_ids'
+
+- name: 'List PBS PVE backup user tokens'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'user'
+      - 'list-tokens'
+      - 'backup@pbs'
+      - '--output-format'
+      - 'json'
+  delegate_to: '{{ pve_pbs_storage_host }}'
+  register: 'pve_pbs_backup_token_list_result'
+  changed_when: false
+
+- name: 'Parse PBS PVE backup user tokens'
+  ansible.builtin.set_fact:
+    pve_pbs_backup_token_list: '{{ pve_pbs_backup_token_list_result.stdout | from_json }}'
+
+- name: 'Build PBS PVE backup token id list'
+  ansible.builtin.set_fact:
+    pve_pbs_backup_token_ids: '{{ pve_pbs_backup_token_list | map(attribute=''tokenid'') | list }}'
+
+- name: 'Set PBS PVE backup token state'
+  ansible.builtin.set_fact:
+    pve_pbs_backup_token_exists: '{{ pve_pbs_storage_username in pve_pbs_backup_token_ids }}'
+
+- name: 'Mark PVE PBS storage password update needed for missing token'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_password_update_needed: true
+  when: 'not pve_pbs_backup_token_exists'
+
+- name: 'Delete existing PBS PVE backup token before regeneration'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'user'
+      - 'delete-token'
+      - 'backup@pbs'
+      - '{{ inventory_hostname }}'
+  delegate_to: '{{ pve_pbs_storage_host }}'
+  changed_when: true
+  when:
+    - 'pve_pbs_backup_token_exists'
+    - 'pve_pbs_storage_password_update_needed'
+
+- name: 'Generate PBS PVE backup token'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'user'
+      - 'generate-token'
+      - 'backup@pbs'
+      - '{{ inventory_hostname }}'
+      - '--comment'
+      - 'Proxmox VE backup token for {{ inventory_hostname }}'
+      - '--output-format'
+      - 'json'
+  delegate_to: '{{ pve_pbs_storage_host }}'
+  register: 'pve_pbs_backup_token_generate_result'
+  changed_when: true
+  no_log: true
+  when: 'pve_pbs_storage_password_update_needed'
+
+- name: 'Parse generated PBS PVE backup token secret'
+  ansible.builtin.set_fact:
+    pve_pbs_storage_token_secret: '{{ pve_pbs_backup_token_generate_result.stdout | from_json }}'
+  no_log: true
+  when: 'pve_pbs_storage_password_update_needed'
+
+- name: 'List PBS ACLs for PVE backup access'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'acl'
+      - 'list'
+      - '--output-format'
+      - 'json'
+  delegate_to: '{{ pve_pbs_storage_host }}'
+  register: 'pve_pbs_acl_list_result'
+  changed_when: false
+
+- name: 'Parse PBS ACLs for PVE backup access'
+  ansible.builtin.set_fact:
+    pve_pbs_acl_list: '{{ pve_pbs_acl_list_result.stdout | from_json }}'
+
+- name: 'Grant PBS PVE backup user access'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'acl'
+      - 'update'
+      - '{{ pve_pbs_storage_acl_path }}'
+      - 'DatastoreBackup'
+      - '--auth-id'
+      - 'backup@pbs'
+  delegate_to: '{{ pve_pbs_storage_host }}'
+  changed_when: true
+  when: '
+    (pve_pbs_acl_list
+    | selectattr(''path'', ''defined'')
+    | selectattr(''path'', ''equalto'', pve_pbs_storage_acl_path)
+    | selectattr(''ugid'', ''defined'')
+    | selectattr(''ugid'', ''equalto'', ''backup@pbs'')
+    | selectattr(''roleid'', ''defined'')
+    | selectattr(''roleid'', ''equalto'', ''DatastoreBackup'')
+    | list
+    | length) == 0
+    '
+
+- name: 'Grant PBS PVE backup token access'
+  ansible.builtin.command:
+    argv:
+      - 'proxmox-backup-manager'
+      - 'acl'
+      - 'update'
+      - '{{ pve_pbs_storage_acl_path }}'
+      - 'DatastoreBackup'
+      - '--auth-id'
+      - '{{ pve_pbs_storage_username }}'
+  delegate_to: '{{ pve_pbs_storage_host }}'
+  changed_when: true
+  when: '
+    (pve_pbs_acl_list
+    | selectattr(''path'', ''defined'')
+    | selectattr(''path'', ''equalto'', pve_pbs_storage_acl_path)
+    | selectattr(''ugid'', ''defined'')
+    | selectattr(''ugid'', ''equalto'', pve_pbs_storage_username)
+    | selectattr(''roleid'', ''defined'')
+    | selectattr(''roleid'', ''equalto'', ''DatastoreBackup'')
+    | list
+    | length) == 0
+    '
+
+- name: 'Create PVE PBS storage'
+  ansible.builtin.command:
+    argv:
+      - 'pvesm'
+      - 'add'
+      - 'pbs'
+      - '{{ pve_pbs_storage_id }}'
+      - '--server'
+      - '{{ pve_pbs_storage_server }}'
+      - '--datastore'
+      - '{{ pve_pbs_storage_datastore }}'
+      - '--username'
+      - '{{ pve_pbs_storage_username }}'
+      - '--password'
+      - '{{ pve_pbs_storage_token_secret.value }}'
+      - '--fingerprint'
+      - '{{ pve_pbs_storage_resolved_fingerprint }}'
+      - '--content'
+      - '{{ pve_pbs_storage_content }}'
+  changed_when: true
+  no_log: true
+  when: 'pve_pbs_storage_config_result.rc != 0'
+
+- name: 'Update PVE PBS storage'
+  ansible.builtin.command:
+    argv:
+      - 'pvesm'
+      - 'set'
+      - '{{ pve_pbs_storage_id }}'
+      - '--server'
+      - '{{ pve_pbs_storage_server }}'
+      - '--datastore'
+      - '{{ pve_pbs_storage_datastore }}'
+      - '--username'
+      - '{{ pve_pbs_storage_username }}'
+      - '--fingerprint'
+      - '{{ pve_pbs_storage_resolved_fingerprint }}'
+      - '--content'
+      - '{{ pve_pbs_storage_content }}'
+  changed_when: true
+  when:
+    - 'pve_pbs_storage_config_result.rc == 0'
+    - 'pve_pbs_storage_update_needed'
+
+- name: 'Update PVE PBS storage password'
+  ansible.builtin.command:
+    argv:
+      - 'pvesm'
+      - 'set'
+      - '{{ pve_pbs_storage_id }}'
+      - '--password'
+      - '{{ pve_pbs_storage_token_secret.value }}'
+  changed_when: true
+  no_log: true
+  when:
+    - 'pve_pbs_storage_config_result.rc == 0'
+    - 'pve_pbs_storage_password_update_needed'

@@ -1,4 +1,4 @@
 ---
 creation_rules:
-  - path_regex: '(^|/)(group_vars|host_vars|secrets)/.*\.sops\.ya?ml$'
+  - path_regex: '(^|/)(group_vars|host_vars)/.*\.sops\.ya?ml$'
     age: 'age17ggrc2pg965fvc03gfrvag95esywp9ww0tgkygpt70hf206xag5qtcwvwv'

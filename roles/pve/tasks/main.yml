@@ -1,0 +1,10 @@
+---
+- name: 'Configure Proxmox Backup Server storage'
+  ansible.builtin.include_tasks: 'pbs-storage.yml'
+  loop: '{{ groups[''pbs''] | default([]) }}'
+  loop_control:
+    loop_var: 'pve_pbs_storage_host'
+    label: '{{ pve_pbs_storage_host }}'
+  tags:
+    - 'pve'
+    - 'storage'

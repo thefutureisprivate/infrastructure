@@ -17,7 +17,3 @@ group_vars/**/secrets.yml
 group_vars/**/secrets.yaml
 host_vars/**/secrets.yml
 host_vars/**/secrets.yaml
-secrets/**/*.yml
-secrets/**/*.yaml
-!secrets/**/*.sops.yml
-!secrets/**/*.sops.yaml
