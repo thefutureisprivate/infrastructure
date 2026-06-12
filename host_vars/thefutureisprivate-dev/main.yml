@@ -6,7 +6,10 @@ dns_desec_rrsets:
     type: 'CAA'
     ttl: 3600
     records:
-      - '128 issue ";"'
+      - '0 issue "letsencrypt.org"'
+      - '0 issue "pki.goog; cansignhttpexchanges=yes"'
+      - '0 issue "ssl.com"'
+      - '128 issuewild ";"'
       - '128 issuevmc ";"'
       - '128 issuemail ";"'
       - '128 iodef "mailto:caa@thefutureisprivate.dev"'
@@ -33,45 +36,15 @@ dns_desec_rrsets:
     records:
       - '"v=TLSRPTv1; rua=mailto:tls-rpt@thefutureisprivate.dev"'
   - subname: 'mta-sts'
-    type: 'CAA'
+    type: 'CNAME'
     ttl: 3600
     records:
-      - '0 issue "letsencrypt.org"'
-      - '0 issuewild ";"'
-      - '0 issuemail ";"'
-      - '0 issuevmc ";"'
-      - '0 iodef "mailto:caa@thefutureisprivate.dev"'
-  - subname: 'mta-sts'
-    type: 'A'
-    ttl: 3600
-    records:
-      - '185.199.108.153'
-      - '185.199.109.153'
-      - '185.199.110.153'
-      - '185.199.111.153'
-  - subname: 'mta-sts'
-    type: 'AAAA'
-    ttl: 3600
-    records:
-      - '2606:50c0:8000::153'
-      - '2606:50c0:8001::153'
-      - '2606:50c0:8002::153'
-      - '2606:50c0:8003::153'
+      - 'infrastructure-19b.pages.dev.'
   - subname: '_mta-sts'
     type: 'TXT'
     ttl: 3600
     records:
       - '"v=STSv1; id=2026061200"'
-  - subname: 'mta-sts'
-    type: 'TXT'
-    ttl: 3600
-    records:
-      - '"v=spf1 -all"'
-  - subname: 'mta-sts'
-    type: 'MX'
-    ttl: 3600
-    records:
-      - '0 .'
   - subname: 'protonmail._domainkey'
     type: 'CNAME'
     ttl: 3600
