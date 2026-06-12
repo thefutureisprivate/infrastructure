@@ -1,0 +1,6 @@
+---
+- name: 'Manage DNS'
+  hosts: 'dns'
+  gather_facts: false
+  roles:
+    - role: 'dns'

@@ -1,0 +1,193 @@
+---
+- name: 'Read deSEC API token from environment'
+  ansible.builtin.set_fact:
+    dns_desec_api_token: '{{ lookup("ansible.builtin.env", "DESEC_TOKEN") }}'
+  vars:
+    dns_desec_env_token: '{{ lookup("ansible.builtin.env", "DESEC_TOKEN") }}'
+  when:
+    - 'dns_desec_api_token | default("") | length == 0'
+    - 'dns_desec_env_token | length > 0'
+  no_log: true
+
+- name: 'Check deSEC SOPS secret file'
+  ansible.builtin.stat:
+    path: '{{ dns_desec_sops_file }}'
+  register: 'dns_desec_sops_file_stat'
+  delegate_to: 'localhost'
+  when: 'dns_desec_api_token | default("") | length == 0'
+
+- name: 'Load deSEC API token from SOPS'
+  community.sops.load_vars:
+    file: '{{ dns_desec_sops_file }}'
+    name: 'dns_desec_sops_secrets'
+  when:
+    - 'dns_desec_api_token | default("") | length == 0'
+    - 'dns_desec_sops_file_stat.stat.exists | default(false)'
+  no_log: true
+
+- name: 'Use deSEC API token from SOPS'
+  ansible.builtin.set_fact:
+    dns_desec_api_token: '{{ dns_desec_sops_secrets.dns_desec_api_token | default("") }}'
+  when:
+    - 'dns_desec_api_token | default("") | length == 0'
+    - 'dns_desec_sops_secrets is defined'
+  no_log: true
+
+- name: 'Validate deSEC API token'
+  ansible.builtin.assert:
+    that:
+      - 'dns_desec_api_token | length > 0'
+    fail_msg: 'Set DESEC_TOKEN or edit secrets/desec.sops.yml with SOPS.'
+  no_log: true
+
+- name: 'Validate DNS domain'
+  ansible.builtin.assert:
+    that:
+      - 'dns_domain is defined'
+      - 'dns_domain | length > 0'
+    fail_msg: 'Set dns_domain for this DNS inventory host.'
+
+- name: 'Select desired deSEC RRsets'
+  ansible.builtin.set_fact:
+    dns_effective_desec_rrsets: >-
+      {{ dns_desec_rrsets if dns_desec_rrsets | length > 0 else dns_desec_default_rrsets }}
+
+- name: 'Validate desired deSEC RRsets'
+  ansible.builtin.assert:
+    that:
+      - 'item.subname is defined'
+      - 'item.type is defined'
+      - 'item.ttl is defined'
+      - 'item.records is defined'
+      - 'item.records | length > 0'
+      - 'item.records | reject("equalto", "") | list | length == item.records | length'
+      - '"replace-with" not in (item.records | join(" "))'
+    fail_msg: 'Each deSEC RRset needs real subname, type, ttl, and records.'
+  loop: '{{ dns_effective_desec_rrsets }}'
+  loop_control:
+    label: '{{ item.subname | default("") }} {{ item.type | default("") }}'
+
+- name: 'Initialize desired deSEC RRset facts'
+  ansible.builtin.set_fact:
+    dns_desired_rrsets: []
+    dns_desired_rrsets_by_key: {}
+
+- name: 'Normalize desired deSEC RRsets'
+  ansible.builtin.set_fact:
+    dns_desired_rrsets: '{{ dns_desired_rrsets + [dns_normalized] }}'
+    dns_desired_rrsets_by_key: >-
+      {{ dns_desired_rrsets_by_key | combine({dns_rrset_key: dns_normalized}) }}
+  vars:
+    dns_rrset_key: '{{ (item.subname | default("")) ~ "|" ~ (item.type | upper) }}'
+    dns_normalized:
+      subname: '{{ item.subname | default("") }}'
+      type: '{{ item.type | upper }}'
+      ttl: '{{ item.ttl | int }}'
+      records: '{{ item.records }}'
+  loop: '{{ dns_effective_desec_rrsets }}'
+  loop_control:
+    label: '{{ dns_rrset_key }}'
+
+- name: 'Read current deSEC RRsets'
+  ansible.builtin.uri:
+    url: '{{ dns_desec_api_base_url }}/domains/{{ dns_domain }}/rrsets/'
+    method: 'GET'
+    headers:
+      Authorization: 'Token {{ dns_desec_api_token }}'
+      Accept: 'application/json'
+    return_content: true
+    status_code:
+      - 200
+  register: 'dns_desec_current_response'
+  no_log: true
+
+- name: 'Initialize current deSEC RRset facts'
+  ansible.builtin.set_fact:
+    dns_current_rrsets: '{{ dns_desec_current_response.json }}'
+    dns_current_manageable_rrsets: []
+    dns_current_rrsets_by_key: {}
+  no_log: true
+
+- name: 'Index current manageable deSEC RRsets'
+  ansible.builtin.set_fact:
+    dns_current_manageable_rrsets: '{{ dns_current_manageable_rrsets + [dns_normalized] }}'
+    dns_current_rrsets_by_key: >-
+      {{ dns_current_rrsets_by_key | combine({dns_rrset_key: dns_normalized}) }}
+  vars:
+    dns_rrset_key: '{{ (item.subname | default("")) ~ "|" ~ item.type }}'
+    dns_normalized:
+      subname: '{{ item.subname | default("") }}'
+      type: '{{ item.type }}'
+      ttl: '{{ item.ttl | int }}'
+      records: '{{ item.records }}'
+  loop: '{{ dns_current_rrsets }}'
+  loop_control:
+    label: '{{ dns_rrset_key }}'
+  when: 'item.type not in dns_desec_preserve_types'
+  no_log: true
+
+- name: 'Initialize deSEC RRset change plan'
+  ansible.builtin.set_fact:
+    dns_rrsets_to_upsert: []
+    dns_rrsets_to_delete: []
+
+- name: 'Plan deSEC RRset upserts'
+  ansible.builtin.set_fact:
+    dns_rrsets_to_upsert: '{{ dns_rrsets_to_upsert + [item] }}'
+  vars:
+    dns_rrset_key: '{{ item.subname ~ "|" ~ item.type }}'
+    dns_current_rrset: '{{ dns_current_rrsets_by_key.get(dns_rrset_key, dns_missing_rrset) }}'
+    dns_missing_rrset:
+      ttl: -1
+      records: []
+  loop: '{{ dns_desired_rrsets }}'
+  loop_control:
+    label: '{{ dns_rrset_key }}'
+  when: >-
+    (dns_current_rrset.ttl | int) != (item.ttl | int)
+    or (dns_current_rrset.records | sort) != (item.records | sort)
+
+- name: 'Plan deSEC RRset deletions'
+  ansible.builtin.set_fact:
+    dns_rrsets_to_delete: '{{ dns_rrsets_to_delete + [dns_delete_rrset] }}'
+  vars:
+    dns_rrset_key: '{{ item.subname ~ "|" ~ item.type }}'
+    dns_delete_rrset:
+      subname: '{{ item.subname }}'
+      type: '{{ item.type }}'
+      records: []
+  loop: '{{ dns_current_manageable_rrsets }}'
+  loop_control:
+    label: '{{ dns_rrset_key }}'
+  when:
+    - 'dns_desec_purge_undefined | bool'
+    - 'dns_rrset_key not in dns_desired_rrsets_by_key'
+  no_log: true
+
+- name: 'Build deSEC RRset change request'
+  ansible.builtin.set_fact:
+    dns_rrset_changes: '{{ dns_rrsets_to_upsert + dns_rrsets_to_delete }}'
+  no_log: true
+
+- name: 'Apply deSEC RRset changes'
+  ansible.builtin.uri:
+    url: '{{ dns_desec_api_base_url }}/domains/{{ dns_domain }}/rrsets/'
+    method: 'PATCH'
+    headers:
+      Authorization: 'Token {{ dns_desec_api_token }}'
+      Content-Type: 'application/json'
+      Accept: 'application/json'
+    body_format: 'json'
+    body: '{{ dns_rrset_changes }}'
+    status_code:
+      - 200
+      - 201
+      - 204
+  when: 'dns_rrset_changes | length > 0'
+  changed_when: true
+  no_log: true
+
+- name: 'Report unchanged deSEC DNS'
+  ansible.builtin.debug:
+    msg: 'deSEC DNS already matches the repository.'
+  when: 'dns_rrset_changes | length == 0'

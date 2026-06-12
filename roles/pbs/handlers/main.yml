@@ -1,7 +1,0 @@
----
-- name: 'Restart chrony'
-  ansible.builtin.systemd:
-    name: 'chrony'
-    state: 'restarted'
-    enabled: true
-    daemon_reload: true

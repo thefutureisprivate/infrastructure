@@ -1,6 +1,10 @@
 ---
 extends: 'default'
 
+ignore: |
+  *.sops.yml
+  *.sops.yaml
+
 rules:
   anchors:
     forbid-undeclared-aliases: true
@@ -34,14 +38,14 @@ rules:
   key-duplicates:
     forbid-duplicated-merge-keys: true
   line-length:
-    max: 100
+    max: 140
     allow-non-breakable-words: true
     allow-non-breakable-inline-mappings: false
   octal-values:
     forbid-implicit-octal: true
     forbid-explicit-octal: true
   quoted-strings:
-    quote-type: 'single'
+    quote-type: 'any'
     required: true
     allow-quoted-quotes: true
     check-keys: false

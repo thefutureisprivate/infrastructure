@@ -1,0 +1,78 @@
+---
+dns_desec_api_base_url: 'https://desec.io/api/v1'
+dns_desec_api_token: ''
+dns_desec_sops_file: '{{ playbook_dir }}/secrets/desec.sops.yml'
+dns_desec_purge_undefined: true
+dns_desec_preserve_types:
+  - 'CDNSKEY'
+  - 'CDS'
+  - 'DNSKEY'
+  - 'DS'
+  - 'NS'
+  - 'NSEC3PARAM'
+  - 'RRSIG'
+  - 'SOA'
+
+# Explicit records override this fallback. The fallback mirrors GrapheneOS's
+# defensive pattern for inactive names: no mail, strict sender policy, denied
+# certificate issuance, and denial-style HTTPS/SSHFP records for apex and www.
+dns_desec_rrsets: []
+dns_desec_default_rrsets:
+  - subname: ''
+    type: 'CAA'
+    ttl: 3600
+    records:
+      - '0 issue ";"'
+      - '0 issuemail ";"'
+      - '0 issuevmc ";"'
+      - '0 iodef "mailto:caa@{{ dns_domain }}"'
+  - subname: ''
+    type: 'HTTPS'
+    ttl: 86400
+    records:
+      - '1 . alpn=h2'
+  - subname: ''
+    type: 'MX'
+    ttl: 86400
+    records:
+      - '0 .'
+  - subname: ''
+    type: 'SSHFP'
+    ttl: 3600
+    records:
+      - '4 2 0000000000000000000000000000000000000000000000000000000000000000'
+  - subname: ''
+    type: 'TXT'
+    ttl: 3600
+    records:
+      - '"v=spf1 -all"'
+  - subname: '_dmarc'
+    type: 'TXT'
+    ttl: 3600
+    records:
+      - '"v=DMARC1; p=reject; adkim=s; aspf=s; fo=1; rua=mailto:dmarc@{{ dns_domain }}"'
+  - subname: '_smtp._tls'
+    type: 'TXT'
+    ttl: 3600
+    records:
+      - '"v=TLSRPTv1; rua=mailto:tls-rpt@{{ dns_domain }}"'
+  - subname: 'www'
+    type: 'HTTPS'
+    ttl: 86400
+    records:
+      - '1 . alpn=h2'
+  - subname: 'www'
+    type: 'MX'
+    ttl: 86400
+    records:
+      - '0 .'
+  - subname: 'www'
+    type: 'SSHFP'
+    ttl: 3600
+    records:
+      - '4 2 0000000000000000000000000000000000000000000000000000000000000000'
+  - subname: 'www'
+    type: 'TXT'
+    ttl: 3600
+    records:
+      - '"v=spf1 -all"'

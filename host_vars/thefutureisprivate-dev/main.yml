@@ -1,0 +1,89 @@
+---
+dns_domain: 'thefutureisprivate.dev'
+
+dns_desec_rrsets:
+  - subname: ''
+    type: 'CAA'
+    ttl: 3600
+    records:
+      - '128 issue ";"'
+      - '128 issuevmc ";"'
+      - '128 issuemail ";"'
+      - '128 iodef "mailto:caa@thefutureisprivate.dev"'
+  - subname: ''
+    type: 'MX'
+    ttl: 3600
+    records:
+      - '10 mail.protonmail.ch.'
+      - '20 mailsec.protonmail.ch.'
+  - subname: ''
+    type: 'TXT'
+    ttl: 3600
+    records:
+      - '"protonmail-verification=137434b0f867aee11ed2707f4eb508293ea1d26d"'
+      - '"v=spf1 include:_spf.protonmail.ch -all"'
+  - subname: '_dmarc'
+    type: 'TXT'
+    ttl: 3600
+    records:
+      - '"v=DMARC1; p=reject; sp=reject; adkim=s; aspf=s; pct=100; rua=mailto:dmarc@thefutureisprivate.dev;"'
+  - subname: '_smtp._tls'
+    type: 'TXT'
+    ttl: 3600
+    records:
+      - '"v=TLSRPTv1; rua=mailto:tls-rpt@thefutureisprivate.dev"'
+  - subname: 'mta-sts'
+    type: 'CAA'
+    ttl: 3600
+    records:
+      - '0 issue "letsencrypt.org"'
+      - '0 issuewild ";"'
+      - '0 issuemail ";"'
+      - '0 issuevmc ";"'
+      - '0 iodef "mailto:caa@thefutureisprivate.dev"'
+  - subname: 'mta-sts'
+    type: 'A'
+    ttl: 3600
+    records:
+      - '185.199.108.153'
+      - '185.199.109.153'
+      - '185.199.110.153'
+      - '185.199.111.153'
+  - subname: 'mta-sts'
+    type: 'AAAA'
+    ttl: 3600
+    records:
+      - '2606:50c0:8000::153'
+      - '2606:50c0:8001::153'
+      - '2606:50c0:8002::153'
+      - '2606:50c0:8003::153'
+  - subname: '_mta-sts'
+    type: 'TXT'
+    ttl: 3600
+    records:
+      - '"v=STSv1; id=2026061200"'
+  - subname: 'mta-sts'
+    type: 'TXT'
+    ttl: 3600
+    records:
+      - '"v=spf1 -all"'
+  - subname: 'mta-sts'
+    type: 'MX'
+    ttl: 3600
+    records:
+      - '0 .'
+  - subname: 'protonmail._domainkey'
+    type: 'CNAME'
+    ttl: 3600
+    records:
+      - 'protonmail.domainkey.dwnizgmtuztgueclsjf4sl3pgvyffen5y5tjyisexc7nytjgaerpq.domains.proton.ch.'
+  - subname: 'protonmail2._domainkey'
+    type: 'CNAME'
+    ttl: 3600
+    records:
+      - 'protonmail2.domainkey.dwnizgmtuztgueclsjf4sl3pgvyffen5y5tjyisexc7nytjgaerpq.domains.proton.ch.'
+  - subname: 'protonmail3._domainkey'
+    type: 'CNAME'
+    ttl: 3600
+    records:
+      - 'protonmail3.domainkey.dwnizgmtuztgueclsjf4sl3pgvyffen5y5tjyisexc7nytjgaerpq.domains.proton.ch.'
