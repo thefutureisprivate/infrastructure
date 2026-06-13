@@ -1,4 +1,24 @@
 ---
+- name: 'Check DNS host SOPS variable file'
+  ansible.builtin.stat:
+    path: '{{ dns_host_sops_file }}'
+  register: 'dns_host_sops_file_stat'
+  delegate_to: 'localhost'
+
+- name: 'Load DNS host variables from SOPS'
+  community.sops.load_vars:
+    file: '{{ dns_host_sops_file }}'
+    name: 'dns_host_sops_vars'
+  when: 'dns_host_sops_file_stat.stat.exists | default(false)'
+  no_log: true
+
+- name: 'Use DNS host variables from SOPS'
+  ansible.builtin.set_fact:
+    dns_domain: '{{ dns_host_sops_vars.dns_domain }}'
+    dns_desec_rrsets: '{{ dns_host_sops_vars.dns_desec_rrsets | default([]) }}'
+  when: 'dns_host_sops_vars is defined'
+  no_log: true
+
 - name: 'Read deSEC API token from environment'
   ansible.builtin.set_fact:
     dns_desec_api_token: '{{ lookup("ansible.builtin.env", "DESEC_TOKEN") }}'
@@ -47,10 +67,37 @@
       - 'dns_domain | length > 0'
     fail_msg: 'Set dns_domain for this DNS inventory host.'
 
-- name: 'Select desired deSEC RRsets'
+- name: 'Initialize desired deSEC RRset selection facts'
   ansible.builtin.set_fact:
-    dns_effective_desec_rrsets: >-
-      {{ dns_desec_rrsets if dns_desec_rrsets | length > 0 else dns_desec_default_rrsets }}
+    dns_effective_desec_rrsets: []
+    dns_explicit_desec_rrset_keys: []
+
+- name: 'Index explicit deSEC RRset keys'
+  ansible.builtin.set_fact:
+    dns_explicit_desec_rrset_keys: >-
+      {{ dns_explicit_desec_rrset_keys + [dns_rrset_key] }}
+  no_log: true
+  vars:
+    dns_rrset_key: '{{ (item.subname | default("")) ~ "|" ~ (item.type | upper) }}'
+  loop: '{{ dns_desec_rrsets }}'
+  loop_control:
+    label: '{{ dns_rrset_key }}'
+
+- name: 'Add missing default deSEC RRsets'
+  ansible.builtin.set_fact:
+    dns_effective_desec_rrsets: '{{ dns_effective_desec_rrsets + [item] }}'
+  no_log: true
+  vars:
+    dns_rrset_key: '{{ (item.subname | default("")) ~ "|" ~ (item.type | upper) }}'
+  loop: '{{ dns_desec_default_rrsets }}'
+  loop_control:
+    label: '{{ dns_rrset_key }}'
+  when: 'dns_rrset_key not in dns_explicit_desec_rrset_keys'
+
+- name: 'Add explicit deSEC RRsets'
+  ansible.builtin.set_fact:
+    dns_effective_desec_rrsets: '{{ dns_effective_desec_rrsets + dns_desec_rrsets }}'
+  no_log: true
 
 - name: 'Validate desired deSEC RRsets'
   ansible.builtin.assert:
@@ -66,6 +113,7 @@
   loop: '{{ dns_effective_desec_rrsets }}'
   loop_control:
     label: '{{ item.subname | default("") }} {{ item.type | default("") }}'
+  no_log: true
 
 - name: 'Initialize desired deSEC RRset facts'
   ansible.builtin.set_fact:
@@ -87,6 +135,7 @@
   loop: '{{ dns_effective_desec_rrsets }}'
   loop_control:
     label: '{{ dns_rrset_key }}'
+  no_log: true
 
 - name: 'Read current deSEC RRsets'
   ansible.builtin.uri:
@@ -146,6 +195,7 @@
   when: >-
     (dns_current_rrset.ttl | int) != (item.ttl | int)
     or (dns_current_rrset.records | sort) != (item.records | sort)
+  no_log: true
 
 - name: 'Plan deSEC RRset deletions'
   ansible.builtin.set_fact:

@@ -22,3 +22,10 @@ secrets/**/*.yaml
 *.unencrypted.yaml
 secrets.yml
 secrets.yaml
+# Decrypted encrypted host variable files
+host_vars/private-*/main.yml
+host_vars/private-*/main.yaml
+host_vars/custom-*/main.yml
+host_vars/custom-*/main.yaml
+host_vars/deprecated-*/main.yml
+host_vars/deprecated-*/main.yaml

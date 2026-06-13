@@ -2,6 +2,7 @@
 dns_desec_api_base_url: 'https://desec.io/api/v1'
 dns_desec_api_token: ''
 dns_desec_sops_file: '{{ playbook_dir }}/secrets/desec.sops.yml'
+dns_host_sops_file: '{{ playbook_dir }}/host_vars/{{ inventory_hostname }}/main.sops.yml'
 dns_desec_purge_undefined: true
 dns_desec_preserve_types:
   - 'CDNSKEY'
@@ -13,9 +14,6 @@ dns_desec_preserve_types:
   - 'RRSIG'
   - 'SOA'
 
-# Explicit records override this fallback. The fallback mirrors GrapheneOS's
-# defensive pattern for inactive names: no mail, strict sender policy, denied
-# certificate issuance, and denial-style HTTPS/SSHFP records for apex and www.
 dns_desec_rrsets: []
 dns_desec_default_rrsets:
   - subname: ''

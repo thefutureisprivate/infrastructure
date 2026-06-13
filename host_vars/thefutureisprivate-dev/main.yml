@@ -39,7 +39,7 @@ dns_desec_rrsets:
     type: 'CNAME'
     ttl: 3600
     records:
-      - 'infrastructure-19b.pages.dev.'
+      - 'protonmail-mta-sts-clv.pages.dev.'
   - subname: '_mta-sts'
     type: 'TXT'
     ttl: 3600

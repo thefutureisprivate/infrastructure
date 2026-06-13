@@ -7,3 +7,33 @@ dns:
     thefutureisprivate-app:
       ansible_connection: 'local'
       ansible_host: 'localhost'
+    containercve-com:
+      ansible_connection: 'local'
+      ansible_host: 'localhost'
+    deprecated-01:
+      ansible_connection: 'local'
+      ansible_host: 'localhost'
+    deprecated-02:
+      ansible_connection: 'local'
+      ansible_host: 'localhost'
+    private-01:
+      ansible_connection: 'local'
+      ansible_host: 'localhost'
+    private-02:
+      ansible_connection: 'local'
+      ansible_host: 'localhost'
+    private-03:
+      ansible_connection: 'local'
+      ansible_host: 'localhost'
+    private-04:
+      ansible_connection: 'local'
+      ansible_host: 'localhost'
+    private-05:
+      ansible_connection: 'local'
+      ansible_host: 'localhost'
+    private-06:
+      ansible_connection: 'local'
+      ansible_host: 'localhost'
+    custom-01:
+      ansible_connection: 'local'
+      ansible_host: 'localhost'
