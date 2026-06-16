@@ -7,10 +7,10 @@ dns_desec_rrsets:
     ttl: 3600
     records:
       - '0 issue "letsencrypt.org"'
-      - '0 issue "pki.goog; cansignhttpexchanges=yes"'
+      - '0 issue "pki.goog"'
       - '0 issue "ssl.com"'
       - '0 issuewild "letsencrypt.org"'
-      - '0 issuewild "pki.goog; cansignhttpexchanges=yes"'
+      - '0 issuewild "pki.goog"'
       - '0 issuewild "ssl.com"'
       - '128 issuevmc ";"'
       - '128 issuemail ";"'
