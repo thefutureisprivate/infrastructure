@@ -12,7 +12,7 @@ SOPS_MAIL_FILE ?= SOPS/mail.sops.yaml
 
 .DEFAULT_GOAL := help
 
-.PHONY: help sops-infrastructure-init sops-infrastructure-edit sops-mail-init sops-mail-edit sops-mail-sync-desec ignition image tofu-fmt tofu-init tofu-validate plan apply inventory deploy-bootstrap deploy stalwart-webui-bootstrap stalwart-harden stalwart-audit check clean
+.PHONY: help sops-infrastructure-init sops-infrastructure-edit sops-mail-init sops-mail-edit sops-mail-sync-desec ignition fcos-install tofu-fmt tofu-init tofu-validate plan apply inventory deploy-bootstrap deploy stalwart-webui-bootstrap stalwart-harden stalwart-audit check clean
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -36,9 +36,10 @@ sops-mail-sync-desec: ## Store the generated Stalwart deSEC token in encrypted m
 	@TOFU="$(TOFU)" TF_DIR="$(TF_DIR)" SOPS_MAIL_FILE="$(SOPS_MAIL_FILE)" \
 		bash SOPS/sync-stalwart-desec-token.sh
 
-image: ## Upload the current FCOS Hetzner image as a labeled snapshot (billable)
-	@SOPS_SECRETS_FILE="$(SOPS_INFRASTRUCTURE_FILE)" bash SOPS/exec-env.sh \
-		--allow HCLOUD_TOKEN -- ./Scripts/upload-fcos-image.sh
+fcos-install: ignition ## Install FCOS directly onto pending Hetzner servers through Rescue
+	@TOFU="$(TOFU)" TF_DIR="$(TF_DIR)" IGNITION_FILE="$(IGNITION_FILE)" \
+		SOPS_SECRETS_FILE="$(SOPS_INFRASTRUCTURE_FILE)" bash SOPS/exec-env.sh \
+		--allow HCLOUD_TOKEN -- ./Scripts/install-fcos.sh
 
 tofu-fmt: ## Format OpenTofu configuration
 	@$(TOFU) -chdir="$(TF_DIR)" fmt -recursive
@@ -46,10 +47,10 @@ tofu-fmt: ## Format OpenTofu configuration
 tofu-init: ## Initialize OpenTofu providers and backend
 	@$(TOFU) -chdir="$(TF_DIR)" init
 
-tofu-validate: ignition ## Validate OpenTofu configuration
+tofu-validate: ## Validate OpenTofu configuration
 	@$(TOFU) -chdir="$(TF_DIR)" validate
 
-plan: ignition ## Build Ignition and create an OpenTofu plan
+plan: ## Create a saved OpenTofu plan
 	@SOPS_SECRETS_FILE="$(SOPS_INFRASTRUCTURE_FILE)" bash SOPS/exec-env.sh \
 		--allow HCLOUD_TOKEN DESEC_API_TOKEN -- \
 		$(TOFU) -chdir="$(TF_DIR)" plan -var-file="$(TF_VARS)" -out=main.tfplan

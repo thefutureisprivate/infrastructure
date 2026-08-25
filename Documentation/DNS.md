@@ -21,40 +21,31 @@ declarations, while a snapshot can retain obsolete records and drift silently.
 | Owner | Records |
 | --- | --- |
 | deSEC account | Zone lifecycle, nameservers, DNSSEC keys, and parent delegation |
-| OpenTofu | Apex-deny and account/method-bound `mail` CAA, imported HTTPS RRsets, intentional `www` no-mail MX/SPF policy, node A/AAAA records, Hetzner PTR records, and exact-name Stalwart token policies |
-| Stalwart | Only the explicitly authorized DKIM, SPF, MX, DMARC, SRV, MTA-STS, TLS-RPT, autoconfiguration, and autodiscovery owner/type pairs |
+| OpenTofu | Imported HTTPS RRsets, intentional `www` no-mail MX/SPF policy, node A/AAAA records, Hetzner PTR records, and exact-name Stalwart token policies |
+| Stalwart | Only the explicitly authorized CAA, DKIM, SPF, MX, DMARC, SRV, MTA-STS, TLS-RPT, autoconfiguration, autodiscovery, and ACME-validation owner/type pairs |
 
-`OpenTofu/zone.tf` contains declarative import blocks for the existing CAA and
-four shared RRsets. On the first apply OpenTofu adopts those exact RRsets
-instead of trying to create duplicates. The import blocks remain idempotent
-afterward. A moved block preserves existing state while replacing the broad
-legacy CAA resource with the dedicated Stalwart policy.
+`OpenTofu/zone.tf` contains declarative import blocks for four shared RRsets.
+On the first apply OpenTofu adopts those exact RRsets instead of trying to
+create duplicates. The import blocks remain idempotent afterward.
 
-The apex CAA denies all ordinary and wildcard issuance:
-
-```text
-0 issue ";"
-0 issuewild ";"
-```
-
-The more-specific `mail` CAA overrides that denial only for ordinary
-certificates at `mail.thefutureisprivate.dev`:
+Stalwart owns the apex CAA RRset because the production ACME account URI does
+not exist until Stalwart registers the account. With `caa` included in the
+Domain object's automatic `publishRecords`, Stalwart v0.16.19 derives and
+reconciles an account-bound policy like:
 
 ```text
-128 issue "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/<ACCOUNT_ID>; validationmethods=dns-01"
-0 issuewild ";"
+0 issue "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/<ACCOUNT_ID>"
+0 iodef "mailto:contact@thefutureisprivate.dev"
 ```
 
-The critical flag requires the issuer to process the account and method
-extensions. Both RRsets send `iodef` reports to
-`contact@thefutureisprivate.dev`.
-
-CAA deliberately remains outside Stalwart's `publishRecords`. The pinned
-Stalwart v0.16.19 generator includes `accounturi` but not the required RFC 8657
-`validationmethods` parameter. Stalwart's child token therefore has no CAA
-permission. Every permissive token policy contains an exact domain, subname,
-and type. The token has no TLSA or unrelated-name authority, is bound to the
-mail VPS public addresses, and cannot manage zones or tokens.
+The pinned generator binds issuance to Stalwart's ACME account but does not
+emit the RFC 8657 `validationmethods` parameter, a critical flag, or an
+`issuewild` denial. Keep the Domain's certificate SANs explicit and use the
+documented DNS-01 provider; do not request a wildcard. Every permissive token
+policy still contains an exact domain, subname, and type. CAA is allowed only
+at the mail-domain apex, ACME TXT access is limited to the apex and declared
+mail hostname, and the token has no TLSA or unrelated-name authority. It is
+bound to the mail VPS public addresses and cannot manage zones or tokens.
 
 ## Stalwart Mail Records
 
@@ -67,7 +58,7 @@ changed:
    sign in over the permanent HTTPS listener.
 2. The Stalwart-generated zone file has been reviewed, every active DKIM
    selector is declared in `stalwart_dkim_selectors`, and automatic deSEC
-   publication is configured without CAA or TLSA.
+   publication includes CAA but not TLSA.
 3. Forward and reverse DNS for `mail.thefutureisprivate.dev` match on IPv4 and
    IPv6, and the TLS certificate is valid.
 4. SMTP submission, IMAP, JMAP, inbound SMTP, DKIM, SPF, and DMARC have been
@@ -84,6 +75,11 @@ DKIM rotation is a two-apply operation: add the replacement selector to
 the rollover window, remove the retired selector and apply again. Additional
 mail domains follow the same reviewed owner-name enumeration instead of
 expanding this token across the parent zone.
+
+For the first rollout, the same sequence begins with an empty selector set:
+apply infrastructure, create the Domain and DKIM keys in Stalwart without
+automatic publication, copy the generated selectors into the variables file,
+apply the expanded token policy, and then enable automatic DNS management.
 
 OpenTofu does not adopt legacy apex or `www` SSHFP placeholders. If all-zero
 SHA-256 fingerprints remain in the live zone, they cannot authenticate a real

@@ -12,6 +12,7 @@ bash -n "${repo_root}/Tests/ansible/mocks/podman" "${repo_root}/Tests/ansible/mo
 printf 'Shell syntax: OK\n'
 
 "${repo_root}/Tests/sops-allowlist.sh"
+"${repo_root}/Tests/fcos-rescue-installer.sh"
 
 jq -e -s '
   length == 6 and

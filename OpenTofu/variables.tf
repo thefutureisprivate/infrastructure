@@ -20,42 +20,25 @@ variable "name_prefix" {
   }
 }
 
-variable "fcos_image_id" {
-  description = "Optional Hetzner snapshot ID. When null, the newest matching image_selector is used."
-  type        = number
-  default     = null
-}
-
-variable "fcos_image_selector" {
-  description = "Hetzner label selector used to find the newest FCOS snapshot."
+variable "bootstrap_image" {
+  description = "Native Hetzner image used only until the final server is overwritten from Rescue."
   type        = string
-  default     = "os=fcos,stream=stable"
+  default     = "fedora-44"
 
   validation {
-    condition     = length(trimspace(var.fcos_image_selector)) > 0
-    error_message = "fcos_image_selector cannot be empty."
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]+$", var.bootstrap_image))
+    error_message = "bootstrap_image must be a non-empty Hetzner system-image name."
   }
 }
 
-variable "image_architecture" {
-  description = "Architecture of the FCOS snapshot: x86 or arm."
-  type        = string
-  default     = "x86"
-
-  validation {
-    condition     = contains(["x86", "arm"], var.image_architecture)
-    error_message = "image_architecture must be x86 or arm."
-  }
-}
-
-variable "ignition_file" {
-  description = "Optional path to compiled Ignition JSON; defaults to ../build/fcos.ign."
+variable "ssh_public_key_file" {
+  description = "Optional operator public-key path; defaults to ../Butane/files/operator.pub."
   type        = string
   default     = null
 }
 
 variable "default_server_type" {
-  description = "Default Hetzner server type. Use a CAX type with arm images."
+  description = "Default x86_64 Hetzner server type used by the direct Rescue installer."
   type        = string
   default     = "cx23"
 }
@@ -63,7 +46,7 @@ variable "default_server_type" {
 variable "default_location" {
   description = "Default Hetzner location."
   type        = string
-  default     = "fsn1"
+  default     = "nbg1"
 }
 
 variable "nodes" {
@@ -163,28 +146,17 @@ variable "desec_domain" {
   }
 }
 
-variable "stalwart_acme_account_id" {
-  description = "Numeric Let's Encrypt production ACME account ID registered by Stalwart. It binds CAA issuance to that account."
-  type        = string
-  nullable    = false
-
-  validation {
-    condition     = can(regex("^[1-9][0-9]*$", var.stalwart_acme_account_id))
-    error_message = "stalwart_acme_account_id must be the numeric suffix from Stalwart's production Let's Encrypt accountUri."
-  }
-}
-
 variable "stalwart_dkim_selectors" {
-  description = "Exact active Stalwart DKIM selector labels authorized in deSEC. Add a replacement before rotating DKIM and remove the retired selector afterwards."
+  description = "Exact active Stalwart DKIM selector labels authorized in deSEC. Leave empty only for initial bootstrap, then authorize selectors before automatic publication."
   type        = set(string)
-  nullable    = false
+  default     = []
 
   validation {
-    condition = length(var.stalwart_dkim_selectors) > 0 && alltrue([
+    condition = alltrue([
       for selector in var.stalwart_dkim_selectors :
       can(regex("^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$", selector))
     ])
-    error_message = "stalwart_dkim_selectors must contain at least one exact single-label DKIM selector."
+    error_message = "Every stalwart_dkim_selectors entry must be an exact single-label DKIM selector."
   }
 }
 

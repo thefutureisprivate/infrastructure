@@ -28,8 +28,8 @@ if ((${#application_images[@]} != 3)); then
     "${application_lock}" "${#application_images[@]}" >&2
   exit 1
 fi
-if ((${#tool_images[@]} != 3)); then
-  printf 'Expected exactly three image pins in %s, found %d\n' \
+if ((${#tool_images[@]} != 2)); then
+  printf 'Expected exactly two image pins in %s, found %d\n' \
     "${tool_lock}" "${#tool_images[@]}" >&2
   exit 1
 fi
@@ -58,7 +58,6 @@ done
 
 butane_image=''
 coreos_installer_image=''
-hcloud_uploader_image=''
 for image_ref in "${tool_images[@]}"; do
   case "${image_ref}" in
     quay.io/coreos/butane:*)
@@ -66,9 +65,6 @@ for image_ref in "${tool_images[@]}"; do
       ;;
     quay.io/coreos/coreos-installer:*)
       coreos_installer_image=${image_ref}
-      ;;
-    ghcr.io/apricote/hcloud-upload-image:*)
-      hcloud_uploader_image=${image_ref}
       ;;
     *)
       printf 'Unapproved image repository in %s: %s\n' \
@@ -83,7 +79,6 @@ stalwart_cli_pattern='^docker\.io/stalwartlabs/cli:([0-9]+\.[0-9]+\.[0-9]+)@sha2
 postgres_pattern='^docker\.io/library/postgres:[0-9]+\.[0-9]+-alpine@sha256:[0-9a-f]{64}$'
 butane_pattern='^quay\.io/coreos/butane:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$'
 coreos_installer_pattern='^quay\.io/coreos/coreos-installer:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$'
-hcloud_uploader_pattern='^ghcr\.io/apricote/hcloud-upload-image:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$'
 
 if [[ ! ${stalwart_image} =~ ${stalwart_pattern} ]]; then
   printf 'Stalwart must use an exact vMAJOR.MINOR.PATCH tag and sha256 digest\n' >&2
@@ -109,11 +104,6 @@ if [[ ! ${coreos_installer_image} =~ ${coreos_installer_pattern} ]]; then
   printf 'coreos-installer must use an exact vMAJOR.MINOR.PATCH tag and sha256 digest\n' >&2
   exit 1
 fi
-if [[ ! ${hcloud_uploader_image} =~ ${hcloud_uploader_pattern} ]]; then
-  printf 'hcloud-upload-image must use an exact vMAJOR.MINOR.PATCH tag and sha256 digest\n' >&2
-  exit 1
-fi
-
 printf 'Container image references: pinned and repository-scoped\n'
 
 if [[ ${offline} == true ]]; then
@@ -153,4 +143,4 @@ verify_signed_image \
 printf 'Stalwart provenance: verified signature, Rekor entry, and SLSA provenance\n'
 printf 'Stalwart CLI provenance: verified signature, Rekor entry, and SLSA provenance\n'
 printf 'PostgreSQL provenance: digest-only exception; upstream image is not signed\n'
-printf 'CoreOS and hcloud deployment tools: exact release tags and immutable digests verified\n'
+printf 'CoreOS deployment tools: exact release tags and immutable digests verified\n'

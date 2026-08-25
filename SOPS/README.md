@@ -5,10 +5,10 @@ helper scripts live in this directory. The two secret scopes are deliberately
 separate:
 
 - `infrastructure.sops.yaml` supplies `HCLOUD_TOKEN` and a deSEC bootstrap
-  `DESEC_API_TOKEN` only to OpenTofu and the FCOS image uploader. The deSEC
-  token reads the existing zone, manages the mail host records, and needs
-  token-management permission so OpenTofu can mint the restricted Stalwart
-  child token.
+  `DESEC_API_TOKEN` only to OpenTofu and the direct FCOS Rescue installer. The
+  deSEC token reads the existing zone, manages the mail host records, and
+  needs token-management permission so OpenTofu can mint the restricted
+  Stalwart child token.
 - `mail.sops.yaml` starts with `MAIL_POSTGRES_PASSWORD`. After `make apply`, it
   also contains the generated `STALWART_DESEC_API_TOKEN`. Ansible converts
   those two values into rootful Podman secrets on the FCOS host; neither is
@@ -20,8 +20,9 @@ separate:
 OpenTofu creates Stalwart's deSEC token with a default-deny policy. Its writes
 are limited to exact reviewed mail owner-name/type pairs and declared DKIM
 selectors, and authentication is limited to the mail server's public
-addresses. It cannot write unrelated names or TLSA/CAA/A/AAAA records, create
-or delete domains, or manage tokens. The
+addresses. Its sole CAA grant is the mail-domain apex so Stalwart can publish
+the policy bound to its registered ACME account; it cannot write unrelated
+names or TLSA/A/AAAA records, create or delete domains, or manage tokens. The
 deSEC account retains zone lifecycle authority; OpenTofu owns the declared
 host A/AAAA records, while Stalwart owns the mail-domain records selected in
 its automatic DNS-management configuration.

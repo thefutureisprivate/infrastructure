@@ -181,39 +181,42 @@ For the `thefutureisprivate.dev` Domain object:
 - select the deSEC provider;
 - set the origin to `thefutureisprivate.dev`;
 - publish `dkim`, `spf`, `mx`, `dmarc`, `srv`, `mtaSts`, `tlsRpt`,
-  `autoConfig`, `autoConfigLegacy`, and `autoDiscover`;
-- exclude `caa`, which remains with OpenTofu;
+  `caa`, `autoConfig`, `autoConfigLegacy`, and `autoDiscover`;
 - exclude `tlsa`; adding it later requires a reviewed exact token policy.
 
 The child token is source-address restricted and grants only the exact
 owner-name/type pairs declared by OpenTofu. Copy every active DKIM selector
-from Stalwart's reviewed zone output into `stalwart_dkim_selectors` before
-applying infrastructure or enabling publication. For DKIM rotation, authorize
-the replacement selector first and remove the retired selector only after
-rollover. A denied record requires a reviewed policy change; never add a
-type-only or wildcard grant.
+from Stalwart's reviewed zone output into `stalwart_dkim_selectors`, run
+`make plan` and `make apply` again, and only then enable automatic publication.
+The initial infrastructure apply intentionally creates the child token without
+DKIM permissions because those selector names do not exist yet. For DKIM
+rotation, authorize the replacement selector first and remove the retired
+selector only after rollover. A denied record requires a reviewed policy
+change; never add a type-only or wildcard grant.
 
 ## TLS and Web UI
 
 Create an ACME provider for Let's Encrypt using DNS-01 through the same deSEC
 provider and `contact@thefutureisprivate.dev` as the contact. Test issuance
-against the staging directory first, then switch to production. Assign the
-certificate to `mail.thefutureisprivate.dev` and verify it on 443, 465, and 993
-before accepting users.
+against the staging directory first, then switch to production. Configure the
+Domain for automatic certificate management, explicitly list
+`mail.thefutureisprivate.dev` as a subject alternative name, and do not leave
+the SAN set empty because Stalwart interprets an empty set as a wildcard
+request. Verify the certificate on 443, 465, and 993 before accepting users.
 
-After Stalwart registers the production provider, copy the numeric suffix of
-its read-only `accountUri` field into `stalwart_acme_account_id` in
-`OpenTofu/terraform.tfvars`. A production value has this shape:
+Stalwart registers the production ACME account and then publishes the apex CAA
+RRset itself. Its generated `issue` value includes the provider's read-only
+`accountUri`, which has this shape:
 
 ```text
 https://acme-v02.api.letsencrypt.org/acme/acct/<ACCOUNT_ID>
 ```
 
-Run `make plan` and `make apply`, then verify both CAA RRsets. The apex denies
-ordinary and wildcard issuance. The more-specific `mail` CAA authorizes only
-Stalwart's exact Let's Encrypt account and DNS-01 for
-`mail.thefutureisprivate.dev`, while wildcard issuance remains denied.
-Replacing the ACME account requires updating CAA first.
+Verify the live CAA RRset after the automatic DNS task succeeds. The pinned
+v0.16.19 generator binds issuance to that exact account URI, but does not emit
+`validationmethods`, a critical flag, or `issuewild`; the explicit SAN and
+DNS-01 settings are therefore part of the required policy. Replacing the ACME
+provider makes Stalwart reconcile CAA to the replacement account.
 
 Production never points Stalwart at a remote Web UI updater. Ansible verifies
 the exact upstream bytes before installing them, the Quadlet mounts the bundle
@@ -226,8 +229,8 @@ checksum, and declarative-plan change followed by deployment and live audit.
 Proton Mail is not part of the declared production configuration. Stalwart's
 automatic DNS task owns the apex MX and mail-policy TXT records, DKIM, service
 discovery, TLS reporting, and MTA-STS records, including the `mta-sts` endpoint
-alias and `_mta-sts` policy identifier. OpenTofu retains both CAA RRsets and all
-other non-authorized DNS names.
+alias and `_mta-sts` policy identifier. Stalwart also owns the account-bound
+apex CAA RRset. OpenTofu retains all non-authorized DNS names.
 
 Review the generated zone file before each DNS task, monitor the task result,
 and verify the public records from an independent DNSSEC-validating resolver.

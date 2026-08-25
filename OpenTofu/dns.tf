@@ -21,6 +21,7 @@ locals {
   stalwart_desec_record_policies = merge({
     apex_mx                   = { subname = "@", type = "MX" }
     apex_spf                  = { subname = "@", type = "TXT" }
+    apex_caa                  = { subname = "@", type = "CAA" }
     mail_spf                  = { subname = local.mail_subname, type = "TXT" }
     dmarc                     = { subname = "_dmarc", type = "TXT" }
     tls_reporting             = { subname = "_smtp._tls", type = "TXT" }
@@ -35,6 +36,7 @@ locals {
     carddav_service           = { subname = "_carddavs._tcp", type = "SRV" }
     imaps_service             = { subname = "_imaps._tcp", type = "SRV" }
     submissions_service       = { subname = "_submissions._tcp", type = "SRV" }
+    apex_acme_challenge       = { subname = "_acme-challenge", type = "TXT" }
     mail_acme_challenge       = { subname = "_acme-challenge.${local.mail_subname}", type = "TXT" }
     acme_validation_persist   = { subname = "_validation-persist", type = "TXT" }
     }, {

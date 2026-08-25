@@ -10,7 +10,7 @@ The operator workstation needs:
 - Ansible Core 2.20;
 - `jq`, `curl`, OpenSSL, GNU coreutils, and OpenSSH;
 - Podman or Docker for the exact tag-and-digest-pinned Butane,
-  coreos-installer, hcloud-upload-image, and Stalwart CLI images.
+  coreos-installer, and Stalwart CLI images.
 
 The deployment also needs:
 
@@ -21,8 +21,9 @@ The deployment also needs:
   DNSSEC DS records can be verified;
 - an SSH public key for the FCOS operator account.
 
-The current host profile targets an x86_64 Hetzner CX23. Review the architecture
-constraints before selecting ARM or another server family.
+The direct installer currently targets an x86_64 Hetzner CX23. ARM server
+families are rejected until the installer transport, Butane policy, and gVisor
+pin have an explicit ARM implementation.
 
 When running the operator tooling inside a rootless Distrobox, use the host's
 rootless Podman API rather than starting a second Podman engine against the
@@ -39,14 +40,14 @@ container-private `/tmp`:
 ```bash
 export CONTAINER_HOST="unix:///run/host/run/user/$(id -u)/podman/podman.sock"
 mkdir -p build
-TMPDIR="$PWD/build" make image
+TMPDIR="$PWD/build" make fcos-install
 ```
 
 Running local rootless Podman directly inside Distrobox is unsupported for
 this workflow because its PID namespace cannot safely reuse the host engine's
-pause-process metadata. The upload script uses Podman's `keep-id` user
-namespace so the pinned tool containers can write to the operator-owned bind
-mount without changing its ownership.
+pause-process metadata. The direct installer uses Podman's `keep-id` user
+namespace while extracting the pinned CoreOS Installer and its exact runtime
+libraries into an operator-owned temporary bind mount.
 
 ## Prepare SOPS and age
 
@@ -121,10 +122,9 @@ At minimum, replace `example.com` with the deSEC zone and review:
 - Hetzner location and CX23 server type;
 - the fleet-wide `nodes` map and `mail_server_node_key` role assignment;
 - the mail subname used for forward and reverse DNS;
-- `stalwart_acme_account_id`, copied from the numeric suffix of Stalwart's
-  production Let's Encrypt `accountUri`;
-- `stalwart_dkim_selectors`, copied exactly from Stalwart's reviewed generated
-  zone before automatic DNS publication is enabled;
+- `stalwart_dkim_selectors`; leave it empty for the first infrastructure apply,
+  then copy the exact selectors from Stalwart's reviewed generated zone and
+  apply OpenTofu again before automatic DNS publication is enabled;
 - `mail_ingress_rules`, which are attached only to the selected mail node;
 - billable backups and delete protection.
 
@@ -134,26 +134,6 @@ authentication remains public-key only. The separate mail firewall is attached
 only to `mail_server_node_key`, so adding another VPS does not expose mail
 ports or enroll it in the mail Ansible group.
 
-## Upload Fedora CoreOS
-
-Import the current stable FCOS Hetzner image:
-
-```bash
-make image
-```
-
-Optional environment variables are:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `FCOS_STREAM` | `stable` | Fedora CoreOS stream |
-| `FCOS_ARCHITECTURE` | `x86_64` | Download architecture |
-| `FCOS_LOCATION` | `fsn1` | Location used by the temporary upload server |
-| `CONTAINER_RUNTIME` | `auto` | `auto`, `podman`, or `docker` |
-
-The uploader creates a temporary billable server and a persistent snapshot.
-It labels the snapshot so OpenTofu can select the newest matching image.
-
 ## Plan and Apply
 
 Initialize the provider lock and modules:
@@ -162,17 +142,17 @@ Initialize the provider lock and modules:
 make tofu-init
 ```
 
-Compile Ignition with the committed operator key and create a saved plan:
+Create a saved plan:
 
 ```bash
 make plan
 ```
 
-Review the plan before applying it. In particular, confirm the selected FCOS
-snapshot, firewall ports, server addresses, DNS zone, declarative RRset
-imports, apex-deny and mail-specific CAA policy, and every exact token policy.
-The first apply
-adopts only the RRsets listed in `OpenTofu/zone.tf`; it does not manage any
+Review the plan before applying it. In particular, confirm the final server's
+`nbg1` location, transient native bootstrap image, firewall ports, server
+addresses, DNS zone, declarative RRset imports, and every exact Stalwart token
+policy. The first apply adopts only the RRsets
+listed in `OpenTofu/zone.tf`; it does not manage any
 Stalwart-owned mail records.
 
 Apply the saved plan:
@@ -196,6 +176,46 @@ tofu -chdir=OpenTofu output desec_dnssec_ds_records
 
 Compare the deSEC delegation and DS records with the registrar. DNSSEC is not
 complete unless the registrar publishes the expected DS records.
+
+## Install Fedora CoreOS Directly
+
+OpenTofu creates the final server with the operator public key and a
+`fcos-installation=pending` marker. Compile Ignition, boot each pending server
+into Hetzner Rescue, overwrite its unmounted disk with signature-verified FCOS,
+and reboot it into the installed system:
+
+```bash
+make fcos-install
+```
+
+The command creates no temporary VPS and no snapshot. It extracts
+`coreos-installer` and its runtime libraries from the immutable image in
+`Tools/compose.yaml`, hashes the transferred bundle and Ignition document,
+activates Rescue through the Hetzner API, verifies that the target disk is a
+supported unmounted block device, and lets CoreOS Installer verify Fedora's OS
+image signature. After SSH confirms an FCOS ostree boot, the marker changes to
+`installed`. A normal second run skips that node.
+
+Optional environment variables are:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `FCOS_STREAM` | `stable` | Fedora CoreOS stream installed by coreos-installer |
+| `FCOS_NODE_KEY` | all declared nodes | Install one key from the OpenTofu `nodes` map |
+| `FCOS_INSTALL_DEVICE` | `/dev/sda` | Exact Rescue-visible disk to overwrite |
+| `SSH_PRIVATE_KEY_FILE` | SSH agent/default key | Explicit private key matching `Butane/files/operator.pub` |
+| `CONTAINER_RUNTIME` | `auto` | `auto`, `podman`, or `docker` |
+| `FCOS_REINSTALL` | `0` | Set to `1` only for an intentional destructive reinstall |
+
+`FCOS_ARCHITECTURE` is fixed to `x86_64`; other values fail before Rescue is
+activated. An interrupted installation leaves the marker at `installing`, so
+the same command can retry it. Once it reaches `installed`, only the explicit
+`FCOS_REINSTALL=1` override permits another disk overwrite.
+
+The temporary Rescue SSH host key is accepted into an isolated temporary
+known-hosts file because Hetzner generates it on every Rescue boot. No secret
+application credentials are sent to Rescue. This does not establish trust in
+the permanent FCOS host key; verify that key independently in the next step.
 
 ## Establish SSH Trust
 

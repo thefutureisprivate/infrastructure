@@ -5,18 +5,13 @@ locals {
     "project"    = var.project_name
   }, var.resource_labels)
 
-  ignition_path = var.ignition_file == null ? abspath("${path.root}/../build/fcos.ign") : abspath(var.ignition_file)
-  ignition      = file(local.ignition_path)
-
-  selected_image_id = var.fcos_image_id != null ? var.fcos_image_id : data.hcloud_image.fcos[0].id
+  operator_ssh_public_key_path = var.ssh_public_key_file == null ? abspath("${path.root}/../Butane/files/operator.pub") : abspath(var.ssh_public_key_file)
 }
 
-data "hcloud_image" "fcos" {
-  count = var.fcos_image_id == null ? 1 : 0
-
-  with_selector     = var.fcos_image_selector
-  with_architecture = var.image_architecture
-  most_recent       = true
+resource "hcloud_ssh_key" "operator" {
+  name       = "${var.project_name}-operator"
+  public_key = trimspace(file(local.operator_ssh_public_key_path))
+  labels     = local.common_labels
 }
 
 resource "hcloud_firewall" "fcos" {
@@ -68,10 +63,10 @@ resource "hcloud_server" "fcos" {
   for_each = var.nodes
 
   name        = "${var.name_prefix}-${each.key}"
-  image       = local.selected_image_id
+  image       = var.bootstrap_image
   server_type = coalesce(each.value.server_type, var.default_server_type)
   location    = coalesce(each.value.location, var.default_location)
-  user_data   = local.ignition
+  ssh_keys    = [hcloud_ssh_key.operator.id]
 
   firewall_ids = each.key == var.mail_server_node_key ? [
     hcloud_firewall.fcos.id,
@@ -90,14 +85,14 @@ resource "hcloud_server" "fcos" {
   shutdown_before_deletion = true
 
   labels = merge(local.common_labels, each.value.labels, {
-    "role" = each.key == var.mail_server_node_key ? "mail-server" : "fcos-host"
+    "fcos-installation" = "pending"
+    "role"              = each.key == var.mail_server_node_key ? "mail-server" : "fcos-host"
   })
-}
 
-check "ignition_user_data_limit" {
-  assert {
-    condition     = length(local.ignition) <= 32768
-    error_message = "The compiled Ignition config exceeds Hetzner's 32 KiB user-data limit."
+  lifecycle {
+    # Scripts/install-fcos.sh changes only this marker after a verified first
+    # boot. The remaining labels stay fully managed by OpenTofu.
+    ignore_changes = [labels["fcos-installation"]]
   }
 }
 
@@ -110,5 +105,15 @@ check "mail_server_node" {
   assert {
     condition     = try(var.nodes[var.mail_server_node_key].ipv4, false)
     error_message = "The mail-server node must have IPv4 enabled for broad SMTP interoperability."
+  }
+}
+
+check "direct_install_architecture" {
+  assert {
+    condition = alltrue([
+      for node in values(var.nodes) :
+      !startswith(lower(coalesce(node.server_type, var.default_server_type)), "cax")
+    ])
+    error_message = "Direct rescue installation currently supports x86_64 server types only; CAX is ARM64."
   }
 }

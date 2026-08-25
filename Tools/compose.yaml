@@ -6,5 +6,3 @@ services:
     image: "quay.io/coreos/butane:v0.29.0@sha256:13fec166cb47a8e053dcc23256c0ca41aaa1c61cab39793832aaf8894ca78c8f"
   coreos-installer:
     image: "quay.io/coreos/coreos-installer:v0.26.0@sha256:2c94387e76ae351a4183f29707fd7be57a9290675524391bdb17b40de1e088ff"
-  hcloud-upload-image:
-    image: "ghcr.io/apricote/hcloud-upload-image:v1.5.0@sha256:1cd09ab0e26662a8c244e76a52c1d2f436de27681ca4d56d99d9cc6de1175078"

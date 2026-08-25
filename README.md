@@ -47,15 +47,18 @@ The deployment is split into narrow layers:
 | Quadlet | Declarative systemd lifecycle for Stalwart and PostgreSQL |
 | Stalwart plan | Idempotent listener, HTTP-header, CSP, rate-limit, and SMTP-auth policy |
 
-Ignition is sent directly as Hetzner user data on first boot; cloud-init is not
-part of the design. OpenTofu outputs the generated Ansible inventory, so the
-same declared server identity flows into DNS, reverse DNS, and the mail
-deployment. The full lifecycle and trust boundaries are documented in
-[Architecture](Documentation/Architecture.md).
+OpenTofu creates the final VPS from a disposable native image. The guarded
+installer then boots that same server into Hetzner Rescue, writes verified
+FCOS directly to its disk, and embeds Ignition for first boot; cloud-init and
+persistent snapshots are not part of the design. OpenTofu outputs the
+generated Ansible inventory, so the same declared server identity flows into
+DNS, reverse DNS, and the mail deployment. The full lifecycle and trust
+boundaries are documented in [Architecture](Documentation/Architecture.md).
 
 ## Features
 
-- Uploads the current Fedora CoreOS Hetzner image as a labeled snapshot.
+- Installs verified Fedora CoreOS directly onto each final VPS through Hetzner
+  Rescue, with no temporary server or persistent snapshot.
 - Provisions one or more equally hardened FCOS nodes with a shared SSH/ICMP
   firewall, mail ingress attached only to the selected mail node, and an
   optional spread placement group.
@@ -71,8 +74,8 @@ deployment. The full lifecycle and trust boundaries are documented in
   stub and authenticated Cloudflare DNS-over-TLS, with strict DNSSEC and no
   plaintext or non-validating fallback.
 - Keeps PostgreSQL off the host network and publishes only SMTP,
-  HTTPS/JMAP/CalDAV/CardDAV/WebDAV, implicit-TLS submission, and IMAPS. The temporary bootstrap listener is
-  opt-in and bound to loopback only.
+  HTTPS/JMAP/CalDAV/CardDAV/WebDAV, implicit-TLS submission, and IMAPS. The
+  temporary bootstrap listener is opt-in and bound to loopback only.
 - Reconciles the exact production listeners, permits password authentication
   only after TLS is active, disables permissive CORS and forwarded-IP trust,
   and applies HSTS, CSP, anti-framing, no-sniff, referrer, permissions, origin,
@@ -109,9 +112,10 @@ Security controls are applied at every layer:
   enter only the child process that needs them. Ansible creates Podman secrets
   over standard input and renders no credentials into Quadlets.
 - **DNS:** the deSEC account retains zone lifecycle authority; OpenTofu owns the
-  selected shared RRsets, token, A/AAAA, PTR, and CAA declarations. Stalwart's
-  child token grants only reviewed owner-name/type pairs and exact DKIM
-  selectors; it has no zone-wide or TLSA authority.
+  selected shared RRsets, token, A/AAAA, and PTR declarations. Stalwart's child
+  token grants only reviewed owner-name/type pairs, exact DKIM selectors, and
+  apex CAA so its registered ACME account can publish its own issuance policy;
+  it has no zone-wide or TLSA authority.
 - **Supply chain:** provider locks, action commit pins, image digests, verified
   Stalwart server and CLI signatures and SLSA provenance, hash-locked CI tools,
   digest-pinned provisioning containers, a checksum-verified local Web UI, and
@@ -129,7 +133,7 @@ residual risks, and secret boundaries.
 | OpenTofu 1.12.6 | Cloud, DNS, reverse-DNS, and scoped-token state |
 | SOPS and age | Local encryption and decryption of secret scopes |
 | Ansible Core 2.20 | Python-free remote Quadlet reconciliation |
-| Podman or Docker | Run the repository-pinned Butane, coreos-installer, hcloud uploader, and Stalwart CLI images |
+| Podman or Docker | Run the repository-pinned Butane, coreos-installer, and Stalwart CLI images |
 | jq, curl, OpenSSL, GNU coreutils, GNU Make, Bash, and OpenSSH | Local orchestration, audits, and inventory handling |
 
 The target host needs no manually installed configuration runtime. Fedora
@@ -146,14 +150,14 @@ make sops-mail-edit
 cp OpenTofu/terraform.tfvars.example OpenTofu/terraform.tfvars
 ```
 
-Upload FCOS, initialize OpenTofu, create and apply a reviewed plan, then render
-the inventory:
+Initialize OpenTofu, create and apply a reviewed plan, install FCOS directly
+onto the resulting VPS, then render the inventory:
 
 ```bash
-make image
 make tofu-init
 make plan
 make apply
+make fcos-install
 make inventory
 ```
 
@@ -170,10 +174,12 @@ make deploy
 make stalwart-audit
 ```
 
-The image upload creates temporary billable Hetzner resources. Ignition runs
-only on first boot, so changing host hardening or the gVisor pin requires a
-server rebuild. Follow [Deployment](Documentation/Deployment.md) for the full
-procedure, DNSSEC verification, host-key verification, and the exact
+The direct installer uses the final server itself and creates no snapshot. Its
+OpenTofu-owned marker prevents an accidental second disk installation unless
+`FCOS_REINSTALL=1` is explicitly supplied. Ignition runs only on first boot,
+so changing host hardening or the gVisor pin requires a server rebuild. Follow
+[Deployment](Documentation/Deployment.md) for the full procedure, DNSSEC
+verification, host-key verification, and the exact
 [Stalwart production setup](Documentation/Stalwart.md).
 
 ## Diagnostics and Tests
@@ -192,10 +198,11 @@ sudo journalctl -u gvisor-install.service -u mail-postgres.service -u mail-stalw
 sudo podman ps
 ```
 
-`make check` compiles a test Ignition document and enforces Hetzner's 32 KiB
-user-data limit. CI additionally initializes and validates OpenTofu from the
-committed provider lock file. Operational checks, upgrades, and recovery
-guidance live in [Operations](Documentation/Operations.md).
+`make check` compiles and inspects a test Ignition document, exercises the
+direct-install state guard with mocked Hetzner actions, and validates the
+remaining repository policies. CI additionally initializes and validates
+OpenTofu from the committed provider lock file. Operational checks, upgrades,
+and recovery guidance live in [Operations](Documentation/Operations.md).
 
 ## Documentation
 

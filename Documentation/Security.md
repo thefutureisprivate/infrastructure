@@ -87,6 +87,41 @@ Mail application ports live in a second firewall attached only to
 `mail_server_node_key`. Other VPS nodes receive the same host hardening without
 receiving mail ingress or membership in the Ansible `mail` group.
 
+## Direct Installation Boundary
+
+OpenTofu creates the final server and an operator SSH-key resource from the
+same public key embedded by Butane. The server initially uses a native Hetzner
+image only so it can exist as a cloud resource; the direct installer enables
+`linux64` Rescue through the authenticated API and overwrites that final
+server's disk with FCOS.
+
+The destructive step is constrained by several independent checks:
+
+- OpenTofu must output the exact server ID, name, and assigned address;
+- the live API object must match that identity;
+- `fcos-installation` must be `pending` or an interrupted `installing` state;
+- the remote destination must match a narrow block-device allowlist and have
+  no mounted filesystems;
+- the transferred runtime bundle, Ignition document, and installer binary are
+  checked by SHA-256 before execution;
+- coreos-installer runs without `--insecure`, so Fedora's image signature must
+  validate;
+- the marker changes to `installed` only after SSH observes Fedora CoreOS,
+  `VARIANT_ID=coreos`, and an ostree boot.
+
+OpenTofu ignores drift only for that single installation-marker map element;
+all other server labels remain managed. A server marked `installed` is skipped
+unless the operator explicitly sets `FCOS_REINSTALL=1`. An interrupted run is
+retryable because its marker remains `installing`.
+
+Hetzner generates a temporary SSH host key for every Rescue boot. Automation
+accepts it only into an isolated, deleted-on-exit known-hosts file. This is
+temporary trust on first use, not independent host authentication. Rescue
+receives no SOPS values or application credentials: only the public Ignition
+configuration and digest-pinned installer runtime cross that connection. The
+permanent FCOS host key still requires independent verification before
+Ansible is allowed to connect.
+
 ## Container Boundary
 
 Both Stalwart and PostgreSQL use the explicitly registered `runsc` OCI runtime.
@@ -162,7 +197,7 @@ Two independent SOPS files limit routine secret exposure:
 
 | Scope | Values | Consumers |
 | --- | --- | --- |
-| Infrastructure | `HCLOUD_TOKEN`, bootstrap `DESEC_API_TOKEN` | OpenTofu and FCOS image uploader |
+| Infrastructure | `HCLOUD_TOKEN`, bootstrap `DESEC_API_TOKEN` | OpenTofu and the direct FCOS Rescue installer |
 | Mail runtime | `MAIL_POSTGRES_PASSWORD`, restricted `STALWART_DESEC_API_TOKEN` | Ansible mail deployment |
 | Stalwart hardening | `STALWART_CONFIG_API_TOKEN` | Local pinned Stalwart CLI container |
 
@@ -219,18 +254,22 @@ a separate default-deny child token that cannot:
 
 Every permissive child-token policy has an exact domain, subname, and type.
 DKIM selectors are explicit OpenTofu inputs; unrelated names, wildcard grants,
-TLSA, CAA, A, and AAAA are absent. OpenTofu's apex CAA denies ordinary and
-wildcard issuance. A more-specific CAA at `mail` authorizes ordinary issuance
-only to Stalwart's exact Let's Encrypt account using DNS-01 and keeps wildcard
-issuance denied.
+TLSA, A, and AAAA are absent. The sole CAA grant is the mail-domain apex, where
+Stalwart publishes an `issue` record bound to its registered Let's Encrypt
+account URI. The pinned v0.16.19 generator does not add a validation-method
+constraint or wildcard-denial tag, so the production Domain must use DNS-01
+with an explicit non-wildcard SAN set.
 
 ## Supply-Chain Boundary
 
 - GitHub Actions use full commit pins.
 - Stalwart, its management CLI, and PostgreSQL use a readable version tag plus
   immutable image digest.
-- Butane, coreos-installer, and hcloud-upload-image run only from exact
-  tag-and-digest pins in `Tools/compose.yaml`; no PATH-resolved fallback exists.
+- Butane and coreos-installer run only from exact tag-and-digest pins in
+  `Tools/compose.yaml`; no PATH-resolved fallback exists. The direct installer
+  transfers coreos-installer with the runtime libraries from that same
+  immutable image and invokes its bundled loader, avoiding an unpinned Rescue
+  package installation.
 - CI verifies the Stalwart server and CLI exact tag-workflow identities,
   keyless signatures, Rekor inclusion, and SLSA provenance before accepting
   their digests.
@@ -262,6 +301,9 @@ image does not currently publish equivalent Sigstore evidence.
 - Stalwart listener, HTTP, and SMTP-auth hardening is declarative; domain,
   certificate, account lifecycle, mail policy, and reputation controls still
   require application-level administration.
+- Native CAA ownership lets Stalwart keep the ACME account binding current, but
+  a compromise of Stalwart or its source-restricted deSEC token can replace the
+  apex CAA RRset. deSEC policies constrain owner name and type, not CAA values.
 - The Stalwart Quadlet does not currently set no-new-privileges; its upstream
   image uses a file capability to bind ports below 1024 as UID 2000.
 - When explicitly enabled, the loopback-only Stalwart bootstrap is reachable

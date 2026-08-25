@@ -62,11 +62,6 @@ case "${runtime}" in
 esac
 
 ignition_size=$(wc -c <"${temporary_output}")
-if (( ignition_size > 32768 )); then
-  printf 'Ignition is %d bytes; Hetzner user data is limited to 32768 bytes.\n' "${ignition_size}" >&2
-  exit 1
-fi
-
 chmod 0600 "${temporary_output}"
 mv -f -- "${temporary_output}" "${output_file}"
 printf 'Wrote %s (%d bytes).\n' "${output_file}" "${ignition_size}"

@@ -1,9 +1,9 @@
 project_name = "stalwart-mail"
 name_prefix  = "mail"
 
-# The image bootstrap script labels snapshots with os=fcos,stream=<stream>.
-fcos_image_selector = "os=fcos,stream=stable"
-image_architecture  = "x86"
+# A native image exists only long enough to boot the final server into Rescue;
+# coreos-installer then overwrites its disk with verified Fedora CoreOS.
+bootstrap_image = "fedora-44"
 
 # This deployment uses a single x86 CX23 for Stalwart and PostgreSQL.
 default_server_type = "cx23"
@@ -52,17 +52,11 @@ enable_delete_protection = true
 desec_domain = "example.com"
 desec_ttl    = 300
 
-# Copy the numeric suffix from the accountUri on Stalwart's production
-# Let's Encrypt ACME provider. This value is public and is not a secret.
-stalwart_acme_account_id = "1234567890"
-
-# Copy the exact active selector labels from Stalwart's generated DNS zone.
-# Add a new selector here before rotating DKIM; remove the old selector only
-# after the replacement record is published and serving traffic.
-stalwart_dkim_selectors = [
-  "v1-ed25519-20260825",
-  "v1-rsa-20260825",
-]
+# Initial rollout starts empty. After Stalwart generates its keys, copy the
+# exact active selector labels from its reviewed zone, apply OpenTofu to grant
+# those names, and only then enable automatic DNS publication. Add replacement
+# selectors before rotation and retire old selectors after the rollover.
+stalwart_dkim_selectors = []
 
 # The mail node must use a non-apex hostname so reverse DNS can match it.
 desec_node_subnames = {

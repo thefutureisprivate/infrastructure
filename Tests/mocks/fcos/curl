@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+method=GET
+output_file=''
+url=''
+payload=''
+while (($# > 0)); do
+  case $1 in
+    --config|--header)
+      shift 2
+      ;;
+    --request)
+      method=$2
+      shift 2
+      ;;
+    --output)
+      output_file=$2
+      shift 2
+      ;;
+    --url)
+      url=$2
+      shift 2
+      ;;
+    --data-binary)
+      payload=$2
+      shift 2
+      ;;
+    *)
+      printf 'Unexpected curl mock argument: %s\n' "$1" >&2
+      exit 2
+      ;;
+  esac
+done
+
+: "${FCOS_TEST_API_STATE:?}"
+: "${FCOS_TEST_API_LOG:?}"
+[[ -n ${output_file} && -n ${url} ]] || exit 2
+state=$(<"${FCOS_TEST_API_STATE}")
+printf '%s %s\n' "${method}" "${url}" >>"${FCOS_TEST_API_LOG}"
+
+case "${method} ${url}" in
+  "GET https://api.hetzner.cloud/v1/servers/101")
+    jq -cn --arg state "${state}" '{
+      server: {
+        id: 101,
+        name: "mail-01",
+        labels: {"fcos-installation": $state, "managed-by": "opentofu"},
+        public_net: {
+          ipv4: {ip: "192.0.2.10"},
+          ipv6: {ip: "2001:db8::1"}
+        }
+      }
+    }' >"${output_file}"
+    ;;
+  "PUT https://api.hetzner.cloud/v1/servers/101")
+    jq -er '.labels["fcos-installation"]' <<<"${payload}" >"${FCOS_TEST_API_STATE}"
+    printf '{"server":{}}\n' >"${output_file}"
+    ;;
+  "POST https://api.hetzner.cloud/v1/servers/101/actions/enable_rescue"|\
+  "POST https://api.hetzner.cloud/v1/servers/101/actions/powercycle")
+    printf '{"action":{"id":17}}\n' >"${output_file}"
+    ;;
+  "GET https://api.hetzner.cloud/v1/actions/17")
+    printf '{"action":{"id":17,"status":"success"}}\n' >"${output_file}"
+    ;;
+  *)
+    printf 'Unexpected mock API request: %s %s\n' "${method}" "${url}" >&2
+    exit 1
+    ;;
+esac

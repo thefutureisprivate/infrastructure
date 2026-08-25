@@ -1,5 +1,6 @@
 ---
-# Provider credentials are exposed only to OpenTofu and the FCOS image uploader.
+# Provider credentials are exposed only to OpenTofu and the direct FCOS
+# Rescue installer.
 # The deSEC token must read the existing zone, manage the mail host records,
 # and manage tokens; OpenTofu uses it to mint Stalwart's restricted child token.
 HCLOUD_TOKEN: "replace-with-a-hetzner-cloud-api-token"

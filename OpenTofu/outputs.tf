@@ -2,14 +2,32 @@ output "servers" {
   description = "Addresses and identifiers for every FCOS node."
   value = {
     for key, server in hcloud_server.fcos : key => {
-      id     = server.id
-      name   = server.name
-      ipv4   = server.ipv4_address
-      ipv6   = server.ipv6_address
-      status = server.status
-      image  = local.selected_image_id
+      id              = server.id
+      name            = server.name
+      ipv4            = server.ipv4_address
+      ipv6            = server.ipv6_address
+      status          = server.status
+      bootstrap_image = server.image
     }
   }
+}
+
+output "fcos_install_targets" {
+  description = "Non-secret server identities consumed by the guarded direct-rescue installer."
+  value = {
+    for key, server in hcloud_server.fcos : key => {
+      id           = server.id
+      name         = server.name
+      address      = var.nodes[key].ipv4 ? server.ipv4_address : server.ipv6_address
+      api_address  = var.nodes[key].ipv4 ? server.ipv4_address : server.ipv6_network
+      architecture = "x86_64"
+    }
+  }
+}
+
+output "rescue_ssh_key_id" {
+  description = "Hetzner SSH-key ID injected into the temporary Rescue System."
+  value       = hcloud_ssh_key.operator.id
 }
 
 output "ansible_inventory" {
@@ -65,18 +83,6 @@ output "mail_dns" {
   value = {
     hostname = local.mail_fqdn
     domain   = local.desec_zone_name
-  }
-}
-
-output "stalwart_caa_policy" {
-  description = "Non-secret RFC 8657 issuance boundary enforced for Stalwart certificates."
-  value = {
-    account_uri       = local.stalwart_acme_account_uri
-    issuer            = "letsencrypt.org"
-    authorized_name   = local.mail_fqdn
-    validation_method = "dns-01"
-    wildcard          = false
-    issuer_critical   = true
   }
 }
 

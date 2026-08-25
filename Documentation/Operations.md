@@ -274,7 +274,14 @@ Before rebuilding:
 2. Review DNS TTLs, expected addresses, and mail-delivery impact.
 3. Preserve protected OpenTofu state and the age identity.
 4. Create and review an OpenTofu plan rather than making console-only changes.
-5. Re-establish SSH host-key trust through an independent channel.
+5. Apply the replacement, then run `make fcos-install`; the new server starts
+   with a `pending` marker and is installed directly through Rescue.
+6. Re-establish SSH host-key trust through an independent channel.
 
 Delete protection and rebuild protection are enabled by default. Do not disable
 them casually or bypass the reviewed infrastructure lifecycle.
+
+`FCOS_REINSTALL=1 make fcos-install` deliberately overwrites the existing
+server disk even when its marker is `installed`. It is intended only for a
+reviewed in-place reprovision after backups and should not replace the normal
+OpenTofu replacement workflow.

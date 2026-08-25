@@ -70,6 +70,9 @@ jobs:
       - name: "Verify SOPS environment allowlists"
         run: "Tests/sops-allowlist.sh"
 
+      - name: "Verify direct FCOS rescue installer guards"
+        run: "Tests/fcos-rescue-installer.sh"
+
       - name: "Validate Stalwart hardening plan"
         run: >-
           jq -e -s

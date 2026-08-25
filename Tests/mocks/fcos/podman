@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mount_spec=''
+while (($# > 0)); do
+  if [[ $1 == --volume ]]; then
+    mount_spec=$2
+    break
+  fi
+  shift
+done
+[[ -n ${mount_spec} ]] || exit 2
+output_dir=${mount_spec%%:/out:*}
+
+install -d -m 0700 "${output_dir}/usr/bin" "${output_dir}/lib64"
+printf 'mock installer\n' >"${output_dir}/usr/bin/coreos-installer"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${output_dir}/lib64/ld-linux-x86-64.so.2"
+chmod 0755 "${output_dir}/usr/bin/coreos-installer" "${output_dir}/lib64/ld-linux-x86-64.so.2"
+printf '/lib64/ld-linux-x86-64.so.2\n' >"${output_dir}/loader-path"
+printf '/lib64\n' >"${output_dir}/library-path"

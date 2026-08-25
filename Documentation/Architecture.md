@@ -28,6 +28,7 @@ flowchart LR
   operator["Operator workstation"]
   age["SOPS + age"]
   butane["Butane"]
+  installer["Guarded Rescue installer"]
   tofu["OpenTofu"]
   hcloud["Hetzner Cloud"]
   desec["deSEC"]
@@ -41,10 +42,12 @@ flowchart LR
   operator --> age
   operator --> butane
   age --> tofu
-  butane -->|"Ignition JSON"| tofu
+  butane -->|"Ignition JSON"| installer
   tofu --> hcloud
   tofu --> desec
-  hcloud -->|"First boot with Ignition"| fcos
+  tofu -->|"Final server identity"| installer
+  installer -->|"Hetzner Rescue + verified disk install"| hcloud
+  hcloud -->|"FCOS first boot with embedded Ignition"| fcos
   tofu -->|"Generated inventory"| ansible
   tofu -->|"Restricted Stalwart token"| age
   age --> ansible
@@ -62,44 +65,54 @@ flowchart LR
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | `Butane/` | Mail-independent first-boot user, SSH policy, kernel and sysctl hardening, masked services, gVisor installation | Cloud resources, host roles, or application configuration |
-| `OpenTofu/` | Hetzner servers, shared base firewall, role firewall, placement, backups, protection, per-node reverse DNS, apex-deny and mail-specific CAA, selected shared deSEC RRsets, A/AAAA records, exact-name Stalwart token | Zone lifecycle and authorized mail-domain record contents managed natively by Stalwart |
+| `OpenTofu/` | Hetzner servers, shared base firewall, role firewall, placement, backups, protection, per-node reverse DNS, selected shared deSEC RRsets, A/AAAA records, and the exact-name Stalwart token | Zone lifecycle and authorized mail-domain record contents managed natively by Stalwart |
+| `Scripts/install-fcos*.sh` | Guarded Rescue activation, hash-checked installer transport, direct FCOS disk installation, and installation-state transition | Cloud resource declaration, application secrets, or running-host reconciliation |
 | `SOPS/` | Encrypted provider and application credentials, age recipient policy, secret handoff helpers | Infrastructure state or persistent application data |
 | `Ansible/` | Group-scoped Podman secrets, Quadlet source files, support files, networks, volumes, and service reconciliation | Host boot configuration or cloud lifecycle |
 | `Stalwart/` | Exact TLS listeners, verified local Web UI Application, HTTP security headers and CSP, HTTP and DAV resource limits, and SMTP authentication policy | Domains, accounts, certificates, DNS publication, or mail routing policy |
-| Stalwart | Mail service configuration and explicitly authorized DNS owner/type pairs | Zone lifecycle, CAA/HTTPS records, unrelated names, address records, reverse DNS, TLSA, or token management |
+| Stalwart | Mail service configuration and explicitly authorized DNS owner/type pairs, including its account-bound CAA RRset | Zone lifecycle, HTTPS records, unrelated names, address records, reverse DNS, TLSA, or token management |
 | PostgreSQL | Stalwart relational data | Host networking or external database access |
 
 ## Provisioning Lifecycle
 
-1. `Scripts/upload-fcos-image.sh` runs exact tag-and-digest pins for
-   coreos-installer and hcloud-upload-image, downloads the selected FCOS
-   Hetzner image, and creates a labeled snapshot. OpenTofu selects the newest
-   matching snapshot unless an explicit image ID is supplied.
+1. OpenTofu creates the final x86_64 server from a native bootstrap image,
+   attaches the operator SSH key and firewalls, and records a guarded
+   `fcos-installation=pending` marker. The native filesystem is disposable.
 2. `Scripts/render-ignition.sh` stages the operator's SSH public key and gVisor
-   installer, compiles `Butane/fcos.bu` in strict mode, and rejects output over
-   Hetzner's 32 KiB user-data limit.
-3. OpenTofu sends the Ignition JSON directly as `hcloud_server.user_data`.
-   There is no cloud-init translation or second bootstrap path.
-4. On first boot, Ignition creates the operator account, applies the same host
+   installer and compiles `Butane/fcos.bu` in strict mode.
+3. `Scripts/install-fcos.sh` extracts coreos-installer plus its exact runtime
+   libraries from the immutable tool image, boots the final server into
+   Hetzner Rescue, transfers hash-checked installation inputs, and invokes the
+   bundled loader. The remote guard requires an expected unmounted block
+   device. CoreOS Installer downloads and verifies FCOS, writes it directly to
+   the server disk, embeds Ignition, and sets the Hetzner platform ID. No
+   temporary server, snapshot, or cloud-init path exists.
+4. The controller power-cycles the server, verifies an FCOS ostree boot over
+   SSH, and changes only the ignored installation marker to `installed`.
+   Repeated runs skip it; a destructive reinstall requires an explicit
+   override. Hetzner continues to report the creation-time native image as
+   server metadata even though the local disk now contains FCOS; the
+   `servers.bootstrap_image` output names that distinction explicitly.
+5. On first boot, Ignition creates the operator account, applies the same host
    policy to every node, configures strict Cloudflare DNS-over-TLS, links every
    host resolver client to systemd-resolved's locally validating stub, and
    enables `gvisor-install.service`. That generic unit downloads one immutable
    gVisor release bundle, verifies its SHA-512 digest, and installs `runsc` with
    its required sidecars. It has no mail-unit ordering dependency; Quadlets
    declare their own requirement on it.
-5. OpenTofu reads the existing deSEC zone, reconciles per-node host records,
+6. OpenTofu reads the existing deSEC zone, reconciles per-node host records,
    aligns each Hetzner PTR record with its declared hostname, and mints
    Stalwart's restricted child token for the selected mail node.
-6. `make apply` writes that generated token directly from OpenTofu output into
+7. `make apply` writes that generated token directly from OpenTofu output into
    the encrypted mail secret scope without a plaintext temporary file.
-7. `Scripts/render-inventory.sh` converts the OpenTofu inventory output into an
+8. `Scripts/render-inventory.sh` converts the OpenTofu inventory output into an
    ignored, owner-readable Ansible inventory. Every VPS belongs to `fcos`; only
    the selected node belongs to `mail`.
-8. The current Ansible play targets `mail` only. It verifies the pinned Web UI
+9. The current Ansible play targets `mail` only. It verifies the pinned Web UI
    checksum, mounts that bundle read-only, sends Podman secret bytes through
    SSH standard input, reconciles Quadlet sources atomically, and restarts only
    changed services. FCOS needs no Python interpreter.
-9. After certificate bootstrap, the pinned Stalwart CLI reconciles the
+10. After certificate bootstrap, the pinned Stalwart CLI reconciles the
    committed hardening plan through a least-privilege SOPS-backed API key. It
    skips the mutation when the managed live fields already match and audits
    configuration, HTTPS headers, DAV routes, the TLS 1.3 client floor, and SMTP
@@ -136,15 +149,17 @@ OpenTofu creates a child token with:
 - a default-deny policy;
 - write access only to the exact reviewed mail owner-name/type pairs;
 - DKIM access only for selectors declared in `stalwart_dkim_selectors`;
-- no wildcard, unrelated-name, CAA, A/AAAA, or TLSA permission;
+- no wildcard, unrelated-name, A/AAAA, or TLSA permission; CAA access is
+  limited to the mail-domain apex;
 - authentication restricted to the mail server's public IPv4 and IPv6
   addresses;
 - no domain creation, domain deletion, or token-management permission.
 
-OpenTofu keeps ownership of A, AAAA, Hetzner PTR, strict CAA, and selected
-non-mail records so Stalwart cannot redirect the host identity, weaken
-certificate policy, or expand its own authority. The exact ownership split is
-recorded in [DNS Ownership](DNS.md).
+OpenTofu keeps ownership of A, AAAA, Hetzner PTR, and selected non-mail records
+so Stalwart cannot redirect the host identity or expand its own authority.
+Stalwart owns CAA because only it knows the ACME account URI after registering
+the production account. The exact ownership split is recorded in
+[DNS Ownership](DNS.md).
 
 ## State and Data
 
@@ -164,10 +179,11 @@ must be backed up securely outside this repository.
 
 ## Architecture Constraints
 
-The active host configuration is x86_64-specific: the gVisor release URL and
-several kernel arguments target the CX23 architecture. OpenTofu and the image
-uploader expose ARM options for infrastructure selection, but switching the
-production host to ARM also requires an intentional Butane and gVisor review.
+The active host and direct-install configuration is x86_64-specific: the
+portable installer runtime, gVisor release URL, and several kernel arguments
+target the CX23 architecture. OpenTofu rejects CAX nodes. Supporting ARM
+requires an intentional installer transport, Butane, and gVisor implementation
+rather than an architecture flag alone.
 
 gVisor reduces the host-kernel attack surface but does not remove trust in the
 FCOS host, Podman, the container images, or an operator with root access. Each
