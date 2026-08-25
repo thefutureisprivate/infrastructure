@@ -24,6 +24,30 @@ The deployment also needs:
 The current host profile targets an x86_64 Hetzner CX23. Review the architecture
 constraints before selecting ARM or another server family.
 
+When running the operator tooling inside a rootless Distrobox, use the host's
+rootless Podman API rather than starting a second Podman engine against the
+host storage. Enable the socket once on the host:
+
+```bash
+systemctl --user enable --now podman.socket
+```
+
+Then point the Podman client inside Distrobox at the mounted host socket and
+place transient bind-mounted files under the shared repository rather than the
+container-private `/tmp`:
+
+```bash
+export CONTAINER_HOST="unix:///run/host/run/user/$(id -u)/podman/podman.sock"
+mkdir -p build
+TMPDIR="$PWD/build" make image
+```
+
+Running local rootless Podman directly inside Distrobox is unsupported for
+this workflow because its PID namespace cannot safely reuse the host engine's
+pause-process metadata. The upload script uses Podman's `keep-id` user
+namespace so the pinned tool containers can write to the operator-owned bind
+mount without changing its ownership.
+
 ## Prepare SOPS and age
 
 The committed encrypted files are already bound to the public recipients in

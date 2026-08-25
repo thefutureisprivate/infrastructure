@@ -30,10 +30,13 @@ trap 'rm -rf -- "${download_dir}"' EXIT HUP INT TERM
 download_container() {
   local engine=$1
   local mount_suffix=rw
+  local -a user_namespace_args=()
   if [[ "${engine}" == "podman" ]]; then
     mount_suffix=rw,Z
+    user_namespace_args=(--userns=keep-id)
   fi
   "${engine}" run --rm --interactive --read-only \
+    "${user_namespace_args[@]}" \
     --user "$(id -u):$(id -g)" \
     --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
     --volume "${download_dir}:/data:${mount_suffix}" \
@@ -76,10 +79,13 @@ fi
 
 printf 'Uploading %s. This creates a temporary billable server and a snapshot.\n' "${image_path}"
 mount_suffix=ro
+user_namespace_args=()
 if [[ ${runtime} == podman ]]; then
   mount_suffix=ro,Z
+  user_namespace_args=(--userns=keep-id)
 fi
 "${runtime}" run --rm --interactive --read-only \
+  "${user_namespace_args[@]}" \
   --user "$(id -u):$(id -g)" \
   --cap-drop=all \
   --security-opt=no-new-privileges \
