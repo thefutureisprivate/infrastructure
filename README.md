@@ -1,7 +1,7 @@
 <h1 align="center">Infrastructure</h1>
 
 <p align="center">
-  A hardened Fedora CoreOS fleet with a Stalwart mail-server role on Hetzner Cloud.
+  A minimal and hardened infrastructure stack for Hetzner Cloud.
 </p>
 
 <p align="center">
