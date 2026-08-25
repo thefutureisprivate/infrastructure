@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+state_root=$(cd -- "${script_dir}/.." && pwd)
+secret_directory="${state_root}/secrets"
+mutation_log="${state_root}/mutations.log"
+mkdir -p -- "${secret_directory}"
+
+if [[ ${1:-} != "secret" ]]; then
+  printf 'Unexpected podman command: %s\n' "$*" >&2
+  exit 2
+fi
+
+case ${2:-} in
+  exists)
+    [[ -f "${secret_directory}/${3:?}" ]]
+    ;;
+  create)
+    secret_name=${3:?}
+    [[ ${4:-} == "-" ]]
+    cat >"${secret_directory}/${secret_name}"
+    printf 'podman secret create %s\n' "${secret_name}" >>"${mutation_log}"
+    ;;
+  rm)
+    secret_name=${3:?}
+    rm -f -- "${secret_directory}/${secret_name}"
+    printf 'podman secret rm %s\n' "${secret_name}" >>"${mutation_log}"
+    ;;
+  *)
+    printf 'Unexpected podman secret command: %s\n' "$*" >&2
+    exit 2
+    ;;
+esac

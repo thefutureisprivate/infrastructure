@@ -1,0 +1,5 @@
+---
+# Application credentials are exposed only to the Ansible mail deployment.
+MAIL_POSTGRES_PASSWORD: "replace-with-at-least-32-random-characters"
+# Least-privilege Stalwart API key used only for declarative hardening.
+STALWART_CONFIG_API_TOKEN: "replace-after-creating-the-scoped-stalwart-api-key"

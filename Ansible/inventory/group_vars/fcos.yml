@@ -1,0 +1,6 @@
+---
+# FCOS has no Python interpreter. Keep fact gathering disabled and let the
+# Quadlet roles use their Python-free transport.
+ansible_become: true
+ansible_become_method: "sudo"
+ansible_ssh_common_args: "-o UserKnownHostsFile={{ inventory_dir }}/known_hosts"

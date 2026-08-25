@@ -1,0 +1,40 @@
+[Unit]
+Description=PostgreSQL database for Stalwart
+Documentation=https://hub.docker.com/_/postgres
+Requires=gvisor-install.service
+Wants=network-online.target
+After=gvisor-install.service network-online.target
+
+[Container]
+Image={{ mail_postgres_image }}
+Pull=missing
+PodmanArgs=--runtime=runsc
+ContainerName=mail-postgres
+Network=mail.network
+NetworkAlias=postgres
+Volume=mail-postgres-data.volume:/var/lib/postgresql
+Secret=mail-postgres-password,type=mount,target=postgres-password
+Environment=POSTGRES_DB=stalwart
+Environment=POSTGRES_USER=stalwart
+Environment=POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password
+Environment=POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
+HealthCmd=pg_isready --username=stalwart --dbname=stalwart
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
+NoNewPrivileges=true
+ReadOnly=true
+RunInit=true
+ShmSize=256m
+Tmpfs=/run/postgresql:rw,nosuid,nodev,noexec,size=16m,mode=3777
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777
+
+[Service]
+Restart=always
+RestartSec=5s
+TimeoutStartSec=900
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

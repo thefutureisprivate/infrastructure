@@ -1,0 +1,101 @@
+---
+name: "Validate infrastructure monorepo"
+
+"on":
+  pull_request:
+  push:
+    branches:
+      - "main"
+
+permissions:
+  contents: "read"
+
+jobs:
+  validate:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: "Check out repository"
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"  # v7.0.1
+
+      - name: "Install Cosign"
+        uses: "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6"  # v4.1.2
+
+      - name: "Verify container provenance"
+        run: "./Scripts/verify-container-provenance.sh"
+
+      - name: "Install OpenTofu"
+        uses: "opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4"  # v2.0.2
+        with:
+          tofu_version_file: ".opentofu-version"
+          tofu_wrapper: false
+
+      - name: "Compile test Ignition with the official Butane image"
+        env:
+          BUTANE_RUNTIME: "docker"
+          SSH_PUBLIC_KEY_FILE: "Tests/fixtures/ssh-authorized-key.pub"
+        run: "./Scripts/render-ignition.sh build/fcos.ign"
+
+      - name: "Check OpenTofu formatting"
+        run: "tofu -chdir=OpenTofu fmt -check -recursive"
+
+      - name: "Initialize OpenTofu without a backend"
+        run: "tofu -chdir=OpenTofu init -backend=false"
+
+      - name: "Validate OpenTofu"
+        run: "tofu -chdir=OpenTofu validate"
+
+      - name: "Install Python tooling"
+        uses: "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"  # v7.0.0
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: "Install validation dependencies"
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          -r .github/requirements-validation.txt
+
+      - name: "Test stdin-only Podman secret transport"
+        run: "python Tests/test_quadlet_secret_action.py"
+
+      - name: "Check shell syntax"
+        run: >-
+          find Scripts SOPS Butane Tests -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          && bash -n Tests/ansible/mocks/podman Tests/ansible/mocks/systemctl Tests/mocks/sops
+
+      - name: "Verify SOPS environment allowlists"
+        run: "Tests/sops-allowlist.sh"
+
+      - name: "Validate Stalwart hardening plan"
+        run: >-
+          jq -e -s
+          'length == 4
+          and map(."@type") == ["reconcile", "update", "update", "reconcile"]
+          and map(.object) == ["NetworkListener", "Http", "MtaStageAuth", "Application"]
+          and (.[0].value | keys | sort) == ["https", "imaps", "smtp", "submissions"]
+          and .[1].value.enableHsts == true
+          and .[1].value.usePermissiveCors == false
+          and .[1].value.useXForwarded == false
+          and (.[1].value.responseHeaders["Content-Security-Policy"] | length > 0)
+          and .[3].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip"
+          and (.[3].value.webui.urlPrefix | keys | sort) == ["/account", "/admin"]'
+          Stalwart/hardening.ndjson >/dev/null
+
+      - name: "Check YAML"
+        run: "yamllint -c .yamllint.yml .github Ansible Butane SOPS Tools Tests/ansible/idempotence.yml"
+
+      - name: "Check Ansible syntax"
+        env:
+          ANSIBLE_CONFIG: "Ansible/ansible.cfg"
+        run: >-
+          ansible-playbook --syntax-check -i Ansible/inventory/hosts.example.yml Ansible/playbooks/quadlets.yml
+
+      - name: "Lint Ansible"
+        env:
+          ANSIBLE_CONFIG: "Ansible/ansible.cfg"
+        run: "ansible-lint Ansible Tests/ansible/idempotence.yml"
+
+      - name: "Verify Ansible idempotence"
+        env:
+          ANSIBLE_CONFIG: "Ansible/ansible.cfg"
+        run: "Tests/ansible-idempotence.sh"

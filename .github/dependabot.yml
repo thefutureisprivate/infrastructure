@@ -1,0 +1,38 @@
+---
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/.github"
+    schedule:
+      interval: "daily"
+      time: "05:00"
+      timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "05:00"
+      timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "docker-compose"
+    directory: "/Ansible"
+    schedule:
+      interval: "daily"
+      time: "05:00"
+      timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "docker-compose"
+    directory: "/Tools"
+    schedule:
+      interval: "daily"
+      time: "05:00"
+      timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 7

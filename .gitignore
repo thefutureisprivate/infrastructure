@@ -1,0 +1,30 @@
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+/SOPS/infrastructure.yaml
+/SOPS/mail.yaml
+.ansible
+
+# Generated artifacts
+/build/
+/Ansible/inventory/hosts.yml
+/Ansible/inventory/known_hosts
+
+# OpenTofu
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+/OpenTofu/terraform.tfvars
+/OpenTofu/*.auto.tfvars
+
+# Ansible
+*.retry
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/

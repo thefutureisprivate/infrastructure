@@ -1,0 +1,70 @@
+project_name = "stalwart-mail"
+name_prefix  = "mail"
+
+# The image bootstrap script labels snapshots with os=fcos,stream=<stream>.
+fcos_image_selector = "os=fcos,stream=stable"
+image_architecture  = "x86"
+
+# This deployment uses a single x86 CX23 for Stalwart and PostgreSQL.
+default_server_type = "cx23"
+default_location    = "nbg1"
+
+nodes = {
+  "01" = {}
+}
+mail_server_node_key = "01"
+
+# Stalwart services: federated SMTP, HTTPS/JMAP/admin, implicit-TLS SMTP
+# submission, and IMAPS. The temporary port 8080 bootstrap UI stays bound to
+# host loopback and is never admitted by the Hetzner firewall.
+mail_ingress_rules = [
+  {
+    description = "SMTP"
+    protocol    = "tcp"
+    port        = "25"
+    source_ips  = ["0.0.0.0/0", "::/0"]
+  },
+  {
+    description = "HTTPS and JMAP"
+    protocol    = "tcp"
+    port        = "443"
+    source_ips  = ["0.0.0.0/0", "::/0"]
+  },
+  {
+    description = "SMTP submission over implicit TLS"
+    protocol    = "tcp"
+    port        = "465"
+    source_ips  = ["0.0.0.0/0", "::/0"]
+  },
+  {
+    description = "IMAP over implicit TLS"
+    protocol    = "tcp"
+    port        = "993"
+    source_ips  = ["0.0.0.0/0", "::/0"]
+  }
+]
+
+enable_backups           = true
+enable_delete_protection = true
+
+# deSEC is mandatory. The zone must already exist. The SOPS-injected
+# DESEC_API_TOKEN must read it, manage declared records, and mint child tokens.
+desec_domain = "example.com"
+desec_ttl    = 300
+
+# Copy the numeric suffix from the accountUri on Stalwart's production
+# Let's Encrypt ACME provider. This value is public and is not a secret.
+stalwart_acme_account_id = "1234567890"
+
+# Copy the exact active selector labels from Stalwart's generated DNS zone.
+# Add a new selector here before rotating DKIM; remove the old selector only
+# after the replacement record is published and serving traffic.
+stalwart_dkim_selectors = [
+  "v1-ed25519-20260825",
+  "v1-rsa-20260825",
+]
+
+# The mail node must use a non-apex hostname so reverse DNS can match it.
+desec_node_subnames = {
+  "01" = "mail"
+}

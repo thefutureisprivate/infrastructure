@@ -1,0 +1,5 @@
+---
+creation_rules:
+  - path_regex: "^(infrastructure|mail)(\\.sops)?\\.yaml$"
+    age:
+      - "age1pks2jx8h3c7cj64qh0xeh9zmzqnjznmu93zds8vrjntfnu5xxvtshgk6rs"

@@ -1,0 +1,18 @@
+---
+all:
+  children:
+    fcos:
+      hosts:
+        mail-01:
+          ansible_host: "192.0.2.20"
+          node_key: "01"
+        worker-01:
+          ansible_host: "192.0.2.21"
+          node_key: "02"
+      children:
+        mail:
+          hosts:
+            mail-01:
+              mail_hostname: "mail.example.com"
+  vars:
+    ansible_user: "thefutureisprivate"

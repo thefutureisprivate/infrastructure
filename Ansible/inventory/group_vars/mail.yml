@@ -1,0 +1,62 @@
+---
+mail_postgres_password: "{{ lookup('ansible.builtin.env', 'MAIL_POSTGRES_PASSWORD') }}"
+stalwart_desec_api_token: "{{ lookup('ansible.builtin.env', 'STALWART_DESEC_API_TOKEN') }}"
+mail_container_images: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../compose.yaml') | from_yaml }}"
+mail_postgres_image: "{{ mail_container_images.services.postgres.image }}"
+mail_stalwart_image: "{{ mail_container_images.services.stalwart.image }}"
+mail_stalwart_bootstrap_listener: false
+mail_stalwart_webui_url: "https://github.com/stalwartlabs/webui/releases/download/v1.0.8/webui.zip"
+mail_stalwart_webui_sha256: "a3904b571aacca815eee2c38dd86de510d53304babe50b9576760bf70a36c0bf"
+mail_stalwart_webui_host_path: "/var/lib/stalwart-webui/webui.zip"
+mail_stalwart_webui_container_path: "/opt/stalwart-webui/webui.zip"
+
+quadlet_secrets:
+  - name: "mail-postgres-password"
+    value: "{{ mail_postgres_password }}"
+    min_length: 32
+    services:
+      - "mail-stalwart.service"
+      - "mail-postgres.service"
+  - name: "stalwart-desec-api-token"
+    value: "{{ stalwart_desec_api_token }}"
+    min_length: 16
+    services:
+      - "mail-stalwart.service"
+
+quadlet_support_files:
+  - name: "stalwart-config.json"
+    mode: "0644"
+    services:
+      - "mail-stalwart.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/stalwart-config.json.j2') }}"
+
+quadlet_units:
+  - name: "mail.network"
+    services:
+      - "mail-stalwart.service"
+      - "mail-postgres.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail.network.j2') }}"
+  - name: "mail-postgres-data.volume"
+    services:
+      - "mail-stalwart.service"
+      - "mail-postgres.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-postgres-data.volume.j2') }}"
+  - name: "mail-stalwart-data.volume"
+    services:
+      - "mail-stalwart.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-stalwart-data.volume.j2') }}"
+  - name: "mail-postgres.container"
+    service: "mail-postgres.service"
+    services:
+      - "mail-stalwart.service"
+      - "mail-postgres.service"
+    mode: "0644"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-postgres.container.j2') }}"
+  - name: "mail-stalwart.container"
+    service: "mail-stalwart.service"
+    mode: "0644"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-stalwart.container.j2') }}"
+
+# Deletions are always explicit. Add both the source filename and generated
+# service name here when retiring a unit.
+quadlet_absent_units: []

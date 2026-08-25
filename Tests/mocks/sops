@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (($# != 4)) || [[ $1 != decrypt || $2 != --output-type || $3 != json ]]; then
+  printf 'Unexpected mock sops invocation: %s\n' "$*" >&2
+  exit 2
+fi
+
+printf '%s' '{"HCLOUD_TOKEN":"selected-cloud-token","DESEC_API_TOKEN":"unselected-dns-token"}'
+exit "${MOCK_SOPS_EXIT:-0}"

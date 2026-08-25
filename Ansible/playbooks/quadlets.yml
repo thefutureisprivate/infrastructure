@@ -1,0 +1,22 @@
+---
+- name: "Reconcile the Stalwart mail stack on Fedora CoreOS"
+  hosts: "mail"
+  gather_facts: false
+
+  pre_tasks:
+    - name: "Validate the public Stalwart hostname"
+      ansible.builtin.assert:
+        that:
+          - "mail_hostname is defined"
+          - "mail_hostname is string"
+          - "mail_hostname is match('^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$')"
+          - "mail_stalwart_bootstrap_listener is defined"
+          - "mail_stalwart_bootstrap_listener is boolean"
+        fail_msg: "Mail deployment inputs must contain a valid hostname and boolean bootstrap state."
+        quiet: true
+      delegate_to: "localhost"
+      become: false
+
+  roles:
+    - role: "stalwart_webui"
+    - role: "quadlet"

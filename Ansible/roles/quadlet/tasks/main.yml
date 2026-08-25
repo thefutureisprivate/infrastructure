@@ -1,0 +1,352 @@
+---
+- name: "Validate Quadlet role collection inputs on the controller"
+  ansible.builtin.assert:
+    that:
+      - "(quadlet_units | type_debug) == 'list'"
+      - "(quadlet_support_files | type_debug) == 'list'"
+      - "(quadlet_absent_units | type_debug) == 'list'"
+      - "(quadlet_secrets | type_debug) == 'list'"
+      - "quadlet_directory is string"
+      - "quadlet_directory is match('^/[A-Za-z0-9_./@+-]+$')"
+      - "quadlet_directory != '/'"
+      - "not quadlet_directory.endswith('/')"
+      - "'//' not in quadlet_directory"
+      - "'/./' not in quadlet_directory"
+      - "'/../' not in quadlet_directory"
+      - "not quadlet_directory.endswith('/.')"
+      - "not quadlet_directory.endswith('/..')"
+      - "quadlet_secret_state_directory is string"
+      - "quadlet_secret_state_directory is match('^/[A-Za-z0-9_./@+-]+$')"
+      - "quadlet_secret_state_directory != '/'"
+      - "not quadlet_secret_state_directory.endswith('/')"
+      - "'//' not in quadlet_secret_state_directory"
+      - "'/./' not in quadlet_secret_state_directory"
+      - "'/../' not in quadlet_secret_state_directory"
+      - "not quadlet_secret_state_directory.endswith('/.')"
+      - "not quadlet_secret_state_directory.endswith('/..')"
+      - "quadlet_podman_binary is match('^/[A-Za-z0-9_./@+-]+$')"
+      - "quadlet_podman_binary != '/'"
+      - "'//' not in quadlet_podman_binary"
+      - "'/./' not in quadlet_podman_binary"
+      - "'/../' not in quadlet_podman_binary"
+      - "not quadlet_podman_binary.endswith('/')"
+      - "not quadlet_podman_binary.endswith('/.')"
+      - "not quadlet_podman_binary.endswith('/..')"
+      - "quadlet_systemctl_binary is match('^/[A-Za-z0-9_./@+-]+$')"
+      - "quadlet_systemctl_binary != '/'"
+      - "'//' not in quadlet_systemctl_binary"
+      - "'/./' not in quadlet_systemctl_binary"
+      - "'/../' not in quadlet_systemctl_binary"
+      - "not quadlet_systemctl_binary.endswith('/')"
+      - "not quadlet_systemctl_binary.endswith('/.')"
+      - "not quadlet_systemctl_binary.endswith('/..')"
+    fail_msg: "Quadlet role collections and absolute paths must use the documented types and safe path syntax."
+    quiet: true
+  delegate_to: "localhost"
+  become: false
+
+- name: "Validate desired Quadlet definitions on the controller"
+  ansible.builtin.assert:
+    that:
+      - "item is mapping"
+      - "item.name is defined"
+      - "item.name is match('^[A-Za-z0-9_.@-]+\\.(artifact|build|container|image|kube|network|pod|volume)$')"
+      - "item.content is defined"
+      - "item.content is string"
+      - "(item.mode | default('0644')) is string"
+      - "item.mode | default('0644') is match('^0[0-7]{3}$')"
+      - "item.service is not defined or item.service is match('^[A-Za-z0-9_.@-]+\\.service$')"
+      - "(item.services | default([]) | type_debug) == 'list'"
+      - >-
+        item.services | default([]) | select('match', '^[A-Za-z0-9_.@-]+\\.service$') | list | length
+        == item.services | default([]) | length
+      - "item.service is not defined or item.service in item.services | default([item.service])"
+      - "item.no_log | default(false) is boolean"
+    fail_msg: "Invalid quadlet_units entry: {{ item }}"
+    quiet: true
+  loop: "{{ quadlet_units }}"
+  loop_control:
+    label: "{{ item.name | default('unnamed') }}"
+  delegate_to: "localhost"
+  become: false
+
+- name: "Validate Quadlet support files on the controller"
+  ansible.builtin.assert:
+    that:
+      - "item is mapping"
+      - "item.name is defined"
+      - "item.name is match('^[A-Za-z0-9_.@-]+$')"
+      - "item.name not in ['.', '..']"
+      - "item.content is defined"
+      - "item.content is string"
+      - "(item.mode | default('0644')) is string"
+      - "item.mode | default('0644') is match('^0[0-7]{3}$')"
+      - "(item.services | default([]) | type_debug) == 'list'"
+      - >-
+        item.services | default([]) | select('match', '^[A-Za-z0-9_.@-]+\\.service$') | list | length
+        == item.services | default([]) | length
+      - "item.no_log | default(false) is boolean"
+    fail_msg: "Invalid quadlet_support_files entry: {{ item }}"
+    quiet: true
+  loop: "{{ quadlet_support_files }}"
+  loop_control:
+    label: "{{ item.name | default('unnamed') }}"
+  delegate_to: "localhost"
+  become: false
+
+- name: "Validate Podman secrets on the controller"
+  ansible.builtin.assert:
+    that:
+      - "item is mapping"
+      - "item.name is defined"
+      - "item.name is match('^[A-Za-z0-9_.-]+$')"
+      - "item.value is defined"
+      - "item.value is string"
+      - "item.value | length >= (item.min_length | default(1))"
+      - "(item.min_length | default(1)) is integer"
+      - "item.min_length | default(1) > 0"
+      - "not item.value.startswith('replace-with-')"
+      - "(item.services | default([]) | type_debug) == 'list'"
+      - >-
+        item.services | default([]) | select('match', '^[A-Za-z0-9_.@-]+\\.service$') | list | length
+        == item.services | default([]) | length
+    fail_msg: "A required Podman secret is missing, still a placeholder, or invalid."
+    quiet: true
+  loop: "{{ quadlet_secrets }}"
+  loop_control:
+    label: "{{ item.name | default('unnamed') }}"
+  no_log: true
+  delegate_to: "localhost"
+  become: false
+
+- name: "Validate absent Quadlet definitions on the controller"
+  ansible.builtin.assert:
+    that:
+      - "item is mapping"
+      - "item.name is defined"
+      - "item.name is match('^[A-Za-z0-9_.@-]+\\.(artifact|build|container|image|kube|network|pod|volume)$')"
+      - "item.service is not defined or item.service is match('^[A-Za-z0-9_.@-]+\\.service$')"
+    fail_msg: "Invalid quadlet_absent_units entry: {{ item }}"
+    quiet: true
+  loop: "{{ quadlet_absent_units }}"
+  loop_control:
+    label: "{{ item.name | default('unnamed') }}"
+  delegate_to: "localhost"
+  become: false
+
+- name: "Reject conflicting or non-idempotent Quadlet declarations"
+  ansible.builtin.assert:
+    that:
+      - "unit_names | unique | length == unit_names | length"
+      - "support_names | unique | length == support_names | length"
+      - "secret_names | unique | length == secret_names | length"
+      - "absent_names | unique | length == absent_names | length"
+      - "unit_services | unique | length == unit_services | length"
+      - "unit_names | intersect(support_names) | length == 0"
+      - "unit_names | intersect(absent_names) | length == 0"
+      - "support_names | intersect(absent_names) | length == 0"
+      - "affected_services | difference(unit_services) | length == 0"
+      - "absent_services | intersect(unit_services) | length == 0"
+    fail_msg: >-
+      Quadlet declarations contain duplicate destinations, desired/absent conflicts, duplicate services,
+      or affected services that this role cannot restore to the desired state.
+    quiet: true
+  vars:
+    unit_names: "{{ quadlet_units | map(attribute='name') | list }}"
+    support_names: "{{ quadlet_support_files | map(attribute='name') | list }}"
+    secret_names: "{{ quadlet_secrets | map(attribute='name') | list }}"
+    absent_names: "{{ quadlet_absent_units | map(attribute='name') | list }}"
+    unit_services: "{{ quadlet_units | selectattr('service', 'defined') | map(attribute='service') | list }}"
+    unit_affected_services: "{{ quadlet_units | map(attribute='services', default=[]) | flatten }}"
+    support_services: "{{ quadlet_support_files | map(attribute='services', default=[]) | flatten }}"
+    secret_services: "{{ quadlet_secrets | map(attribute='services', default=[]) | flatten }}"
+    affected_services: "{{ unit_affected_services + support_services + secret_services }}"
+    absent_services: "{{ quadlet_absent_units | selectattr('service', 'defined') | map(attribute='service') | list }}"
+  delegate_to: "localhost"
+  become: false
+
+- name: "Ensure the rootful Quadlet directory exists"
+  ansible.builtin.raw: |
+    set -eu
+    destination={{ quadlet_directory | quote }}
+    if [ -L "$destination" ] || { [ -e "$destination" ] && [ ! -d "$destination" ]; }; then
+      printf 'Refusing non-directory Quadlet path: %s\n' "$destination" >&2
+      exit 1
+    fi
+    changed=0
+    if [ ! -d "$destination" ] || [ "$(stat -c '%a:%u:%g' "$destination" 2>/dev/null || :)" != "755:0:0" ]; then
+      changed=1
+    fi
+    install -d -m 0755 -o root -g root "$destination"
+    if [ "$changed" -eq 1 ]; then
+      printf '%s\n' CHANGED
+    fi
+  register: "quadlet_directory_result"
+  changed_when: "'CHANGED' in (quadlet_directory_result.stdout_lines | default([]))"
+
+- name: "Ensure the Podman secret state directory exists"
+  ansible.builtin.raw: |
+    set -eu
+    destination={{ quadlet_secret_state_directory | quote }}
+    if [ -L "$destination" ] || { [ -e "$destination" ] && [ ! -d "$destination" ]; }; then
+      printf 'Refusing non-directory Podman secret state path: %s\n' "$destination" >&2
+      exit 1
+    fi
+    changed=0
+    if [ ! -d "$destination" ] || [ "$(stat -c '%a:%u:%g' "$destination" 2>/dev/null || :)" != "700:0:0" ]; then
+      changed=1
+    fi
+    install -d -m 0700 -o root -g root "$destination"
+    if [ "$changed" -eq 1 ]; then
+      printf '%s\n' CHANGED
+    fi
+  when: "quadlet_secrets | length > 0"
+  register: "quadlet_secret_directory_result"
+  changed_when: "'CHANGED' in (quadlet_secret_directory_result.stdout_lines | default([]))"
+
+- name: "Refuse unmanaged Podman secret name collisions"
+  ansible.builtin.raw: |
+    set -eu
+    podman_bin={{ quadlet_podman_binary | quote }}
+    secret_name={{ item.name | quote }}
+    state_file={{ (quadlet_secret_state_directory ~ '/' ~ item.name ~ '.sha256') | quote }}
+    if "$podman_bin" secret exists "$secret_name" && { [ ! -f "$state_file" ] || [ -L "$state_file" ]; }; then
+      printf 'Podman secret %s already exists but is not managed by this role.\n' "$secret_name" >&2
+      exit 1
+    fi
+  loop: "{{ quadlet_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+
+- name: "Reconcile SOPS-backed Podman secrets"
+  quadlet_secret:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state_directory: "{{ quadlet_secret_state_directory }}"
+    podman_binary: "{{ quadlet_podman_binary }}"
+    systemctl_binary: "{{ quadlet_systemctl_binary }}"
+    services: "{{ item.services | default([]) }}"
+  loop: "{{ quadlet_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+
+- name: "Stop and remove explicitly absent Quadlets"
+  ansible.builtin.raw: |
+    set -eu
+    systemctl_bin={{ quadlet_systemctl_binary | quote }}
+    destination={{ (quadlet_directory ~ '/' ~ item.name) | quote }}
+    service={{ item.service | default('') | quote }}
+    changed=0
+    if [ -n "$service" ] && "$systemctl_bin" is-active --quiet "$service"; then
+      "$systemctl_bin" stop "$service"
+      changed=1
+    fi
+    if [ -e "$destination" ] || [ -L "$destination" ]; then
+      rm -f "$destination"
+      changed=1
+    fi
+    if [ "$changed" -eq 1 ]; then
+      printf '%s\n' CHANGED
+    fi
+  loop: "{{ quadlet_absent_units }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: "quadlet_remove_results"
+  changed_when: "'CHANGED' in (quadlet_remove_results.stdout_lines | default([]))"
+
+- name: "Atomically install Quadlet support files"
+  ansible.builtin.raw: |
+    set -eu
+    systemctl_bin={{ quadlet_systemctl_binary | quote }}
+    destination={{ (quadlet_directory ~ '/' ~ item.name) | quote }}
+    desired_mode={{ item.mode | default('0644') | quote }}
+    if [ -e "$destination" ] && [ ! -f "$destination" ]; then
+      printf 'Refusing non-file Quadlet support path: %s\n' "$destination" >&2
+      exit 1
+    fi
+    temporary="$(mktemp "${destination}.XXXXXX")"
+    trap 'rm -f "$temporary"' EXIT HUP INT TERM
+    printf '%s' {{ item.content | b64encode | quote }} | base64 --decode > "$temporary"
+    chmod "$desired_mode" "$temporary"
+    chown root:root "$temporary"
+    if [ -f "$destination" ] && [ ! -L "$destination" ] && cmp --silent "$temporary" "$destination" \
+      && [ "$(stat -c '%a:%u:%g' "$destination")" = "${desired_mode#0}:0:0" ]; then
+      exit 0
+    fi
+    mv -f "$temporary" "$destination"
+    trap - EXIT HUP INT TERM
+    {% for service in item.services | default([]) %}
+    if "$systemctl_bin" is-active --quiet {{ service | quote }}; then
+      "$systemctl_bin" stop {{ service | quote }}
+    fi
+    {% endfor %}
+    printf '%s\n' CHANGED
+  loop: "{{ quadlet_support_files }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: "quadlet_support_write_results"
+  changed_when: "'CHANGED' in (quadlet_support_write_results.stdout_lines | default([]))"
+  no_log: "{{ item.no_log | default(false) }}"
+
+- name: "Atomically install desired Quadlets"
+  ansible.builtin.raw: |
+    set -eu
+    systemctl_bin={{ quadlet_systemctl_binary | quote }}
+    destination={{ (quadlet_directory ~ '/' ~ item.name) | quote }}
+    desired_mode={{ item.mode | default('0644') | quote }}
+    if [ -e "$destination" ] && [ ! -f "$destination" ]; then
+      printf 'Refusing non-file Quadlet path: %s\n' "$destination" >&2
+      exit 1
+    fi
+    temporary="$(mktemp "${destination}.XXXXXX")"
+    trap 'rm -f "$temporary"' EXIT HUP INT TERM
+    printf '%s' {{ item.content | b64encode | quote }} | base64 --decode > "$temporary"
+    chmod "$desired_mode" "$temporary"
+    chown root:root "$temporary"
+    if [ -f "$destination" ] && [ ! -L "$destination" ] && cmp --silent "$temporary" "$destination" \
+      && [ "$(stat -c '%a:%u:%g' "$destination")" = "${desired_mode#0}:0:0" ]; then
+      exit 0
+    fi
+    mv -f "$temporary" "$destination"
+    trap - EXIT HUP INT TERM
+    {% set affected_services = item.services | default(([item.service] if item.service is defined else [])) %}
+    {% for service in affected_services %}
+    if "$systemctl_bin" is-active --quiet {{ service | quote }}; then
+      "$systemctl_bin" stop {{ service | quote }}
+    fi
+    {% endfor %}
+    printf '%s\n' CHANGED
+  loop: "{{ quadlet_units }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: "quadlet_write_results"
+  changed_when: "'CHANGED' in (quadlet_write_results.stdout_lines | default([]))"
+  no_log: "{{ item.no_log | default(false) }}"
+
+- name: "Reload systemd generators after Quadlet source changes"
+  ansible.builtin.raw: "{{ quadlet_systemctl_binary | quote }} daemon-reload"
+  when: >-
+    (quadlet_remove_results.results | default([]) | selectattr('changed') | list | length > 0)
+    or (quadlet_write_results.results | default([]) | selectattr('changed') | list | length > 0)
+  changed_when: false
+
+- name: "Ensure desired Quadlet services are active"
+  ansible.builtin.raw: |
+    set -eu
+    systemctl_bin={{ quadlet_systemctl_binary | quote }}
+    service={{ item.service | quote }}
+    if "$systemctl_bin" is-active --quiet "$service"; then
+      exit 0
+    fi
+    "$systemctl_bin" start "$service"
+    printf '%s\n' CHANGED
+  loop: "{{ quadlet_units }}"
+  loop_control:
+    label: "{{ item.service | default(item.name) }}"
+  when:
+    - "item.service is defined"
+    - "item.service | length > 0"
+  register: "quadlet_service_results"
+  changed_when: "'CHANGED' in (quadlet_service_results.stdout_lines | default([]))"

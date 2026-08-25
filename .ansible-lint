@@ -1,0 +1,9 @@
+---
+profile: production
+exclude_paths:
+  - build/
+  - Ansible/inventory/hosts.yml
+skip_list:
+  # FCOS intentionally has no Python. The role uses raw with explicit
+  # idempotence checks so Ansible can manage an unmodified FCOS node.
+  - command-instead-of-module

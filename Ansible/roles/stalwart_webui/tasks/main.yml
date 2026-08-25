@@ -1,0 +1,53 @@
+---
+- name: "Validate the pinned Stalwart Web UI artifact"
+  ansible.builtin.assert:
+    that:
+      - "mail_stalwart_webui_url is match('^https://github\\.com/stalwartlabs/webui/releases/download/v[0-9]+\\.[0-9]+\\.[0-9]+/webui\\.zip$')"
+      - "mail_stalwart_webui_sha256 is match('^[0-9a-f]{64}$')"
+      - "mail_stalwart_webui_host_path is match('^/[A-Za-z0-9_./-]+$')"
+      - "mail_stalwart_webui_host_path != '/'"
+      - "'..' not in mail_stalwart_webui_host_path.split('/')"
+    fail_msg: "The Web UI must use an exact upstream version, SHA-256 digest, and safe host path."
+    quiet: true
+  delegate_to: "localhost"
+  become: false
+
+- name: "Install the verified Stalwart Web UI bundle atomically"
+  ansible.builtin.raw: |
+    set -eu
+    url={{ mail_stalwart_webui_url | quote }}
+    expected_sha256={{ mail_stalwart_webui_sha256 | quote }}
+    destination={{ mail_stalwart_webui_host_path | quote }}
+    destination_directory="${destination%/*}"
+    systemctl_bin={{ quadlet_systemctl_binary | quote }}
+
+    if [ -L "$destination" ] || { [ -e "$destination" ] && [ ! -f "$destination" ]; }; then
+      printf 'Refusing unsafe Stalwart Web UI path: %s\n' "$destination" >&2
+      exit 1
+    fi
+    install -d -m 0755 -o root -g root "$destination_directory"
+    if [ -f "$destination" ] \
+      && printf '%s  %s\n' "$expected_sha256" "$destination" | sha256sum --check --status \
+      && [ "$(stat -c '%a:%u:%g' "$destination")" = "444:0:0" ]; then
+      exit 0
+    fi
+
+    temporary="$(mktemp "${destination}.XXXXXX")"
+    trap 'rm -f "$temporary"' EXIT HUP INT TERM
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+      --fail --location --silent --show-error --retry 3 \
+      --output "$temporary" "$url"
+    if ! printf '%s  %s\n' "$expected_sha256" "$temporary" | sha256sum --check --status; then
+      printf 'Stalwart Web UI checksum verification failed.\n' >&2
+      exit 1
+    fi
+    chmod 0444 "$temporary"
+    chown root:root "$temporary"
+    mv -f "$temporary" "$destination"
+    trap - EXIT HUP INT TERM
+    if "$systemctl_bin" is-active --quiet mail-stalwart.service; then
+      "$systemctl_bin" stop mail-stalwart.service
+    fi
+    printf '%s\n' CHANGED
+  register: "stalwart_webui_result"
+  changed_when: "'CHANGED' in (stalwart_webui_result.stdout_lines | default([]))"

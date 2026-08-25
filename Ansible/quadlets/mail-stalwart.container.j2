@@ -1,0 +1,37 @@
+[Unit]
+Description=Stalwart mail server
+Documentation=https://stalw.art/docs/install/platform/docker/
+Requires=gvisor-install.service mail-postgres.service
+After=gvisor-install.service mail-postgres.service network-online.target
+
+[Container]
+Image={{ mail_stalwart_image }}
+Pull=missing
+PodmanArgs=--runtime=runsc
+ContainerName=mail-stalwart
+Network=mail.network
+Volume=mail-stalwart-data.volume:/var/lib/stalwart
+Volume={{ quadlet_directory }}/stalwart-config.json:/etc/stalwart/config.json:ro,Z
+Volume={{ mail_stalwart_webui_host_path }}:{{ mail_stalwart_webui_container_path }}:ro,Z
+Secret=mail-postgres-password,type=env,target=STALWART_DB_PASSWORD
+Secret=stalwart-desec-api-token,type=env,target=STALWART_DESEC_API_TOKEN
+Environment=STALWART_PUBLIC_URL=https://{{ mail_hostname }}
+PublishPort=25:25
+PublishPort=443:443
+PublishPort=465:465
+PublishPort=993:993
+{% if mail_stalwart_bootstrap_listener | bool %}
+PublishPort=127.0.0.1:8080:8080
+{% endif %}
+ReadOnly=true
+RunInit=true
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777
+
+[Service]
+Restart=always
+RestartSec=5s
+TimeoutStartSec=900
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

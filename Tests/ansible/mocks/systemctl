@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+state_root=$(cd -- "${script_dir}/.." && pwd)
+service_directory="${state_root}/services"
+mutation_log="${state_root}/mutations.log"
+mkdir -p -- "${service_directory}"
+
+case ${1:-} in
+  is-active)
+    shift
+    if [[ ${1:-} == "--quiet" ]]; then
+      shift
+    fi
+    [[ -f "${service_directory}/${1:?}" ]]
+    ;;
+  start)
+    touch -- "${service_directory}/${2:?}"
+    printf 'systemctl start %s\n' "$2" >>"${mutation_log}"
+    ;;
+  stop)
+    rm -f -- "${service_directory}/${2:?}"
+    printf 'systemctl stop %s\n' "$2" >>"${mutation_log}"
+    ;;
+  restart)
+    touch -- "${service_directory}/${2:?}"
+    printf 'systemctl restart %s\n' "$2" >>"${mutation_log}"
+    ;;
+  daemon-reload)
+    printf '%s\n' "systemctl daemon-reload" >>"${mutation_log}"
+    ;;
+  *)
+    printf 'Unexpected systemctl command: %s\n' "$*" >&2
+    exit 2
+    ;;
+esac

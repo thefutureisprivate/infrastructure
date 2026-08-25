@@ -1,0 +1,46 @@
+---
+- name: "Exercise Quadlet reconciliation twice"
+  hosts: "localhost"
+  connection: "local"
+  gather_facts: false
+  become: "{{ lookup('ansible.builtin.env', 'ANSIBLE_IDEMPOTENCE_BECOME') | bool }}"
+  vars:
+    test_root: "{{ lookup('ansible.builtin.env', 'ANSIBLE_IDEMPOTENCE_ROOT') }}"
+    quadlet_directory: "{{ test_root }}/quadlets"
+    quadlet_secret_state_directory: "{{ test_root }}/secret-state"
+    quadlet_podman_binary: "{{ test_root }}/state/bin/podman"
+    quadlet_systemctl_binary: "{{ test_root }}/state/bin/systemctl"
+    quadlet_secrets:
+      - name: "test-secret"
+        value: |-
+          correct-horse-battery-staple-idempotence
+          shell metacharacters stay data: $() ; ' " \\
+        min_length: 32
+        services:
+          - "test.service"
+    quadlet_support_files:
+      - name: "test.conf"
+        mode: "0640"
+        services:
+          - "test.service"
+        content: |
+          setting=true
+    quadlet_units:
+      - name: "test.network"
+        services:
+          - "test.service"
+        content: |
+          [Network]
+          NetworkName=test
+      - name: "test.container"
+        service: "test.service"
+        mode: "0644"
+        content: |
+          [Container]
+          Image=example.invalid/test@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    quadlet_absent_units:
+      - name: "retired.container"
+        service: "retired.service"
+
+  roles:
+    - role: "quadlet"

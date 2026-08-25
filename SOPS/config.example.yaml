@@ -1,0 +1,7 @@
+---
+# Copy to SOPS/config.yaml and replace the placeholder with one or more public
+# age recipients. Never store an age private identity in this repository.
+creation_rules:
+  - path_regex: "^(infrastructure|mail)(\\.sops)?\\.yaml$"
+    age:
+      - "age1replace_with_your_public_recipient"

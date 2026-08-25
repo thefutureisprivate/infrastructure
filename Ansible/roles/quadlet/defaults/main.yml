@@ -1,0 +1,9 @@
+---
+quadlet_directory: "/etc/containers/systemd"
+quadlet_units: []
+quadlet_support_files: []
+quadlet_absent_units: []
+quadlet_secrets: []
+quadlet_secret_state_directory: "/var/lib/quadlet-secrets"
+quadlet_podman_binary: "/usr/bin/podman"
+quadlet_systemctl_binary: "/usr/bin/systemctl"

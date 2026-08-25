@@ -1,0 +1,37 @@
+extends: default
+
+ignore: |
+  **/SOPS/*.sops.yaml
+
+rules:
+  comments:
+    min-spaces-from-content: 1
+
+  comments-indentation: false
+
+  document-start: disable
+
+  line-length:
+    max: 160
+
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  truthy:
+    allowed-values:
+      - "true"
+      - "false"
+    check-keys: true
+
+  key-duplicates:
+    forbid-duplicated-merge-keys: true
+
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+
+  quoted-strings:
+    required: true
+    quote-type: any
+    check-keys: false

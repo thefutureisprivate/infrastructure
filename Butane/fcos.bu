@@ -1,0 +1,457 @@
+---
+# yamllint disable rule:octal-values
+variant: fcos
+version: 1.7.0
+
+kernel_arguments:
+  should_exist:
+    - mitigations=auto,nosmt
+    - slab_nomerge
+    - init_on_alloc=1
+    - init_on_free=1
+    - page_alloc.shuffle=1
+    - pti=on
+    - randomize_kstack_offset=on
+    - hash_pointers=always
+    - proc_mem.force_override=ptrace
+    - vsyscall=none
+    - ia32_emulation=0
+    - debugfs=off
+    - oops=panic
+    - module.sig_enforce=1
+    - lockdown=confidentiality
+    - random.trust_bootloader=off
+    - random.trust_cpu=off
+    - systemd.ssh_auto=no
+
+passwd:
+  users:
+    - name: thefutureisprivate
+      groups:
+        - wheel
+      ssh_authorized_keys_local:
+        - ssh-authorized-key.pub
+
+storage:
+  directories:
+    - path: /etc/containers/systemd
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+    - path: /etc/containers/containers.conf.d
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+    - path: /etc/NetworkManager/conf.d
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+    - path: /etc/chrony.d
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+    - path: /etc/systemd/coredump.conf.d
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+    - path: /etc/systemd/journald.conf.d
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+    - path: /etc/systemd/resolved.conf.d
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+    - path: /etc/systemd/system.conf.d
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+    - path: /etc/systemd/user.conf.d
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+    - path: /usr/local/share/gvisor
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+  files:
+    - path: /etc/ssh/sshd_config.d/20-fcos-hardening.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          AuthenticationMethods publickey
+          PubkeyAuthentication yes
+          PermitRootLogin no
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitEmptyPasswords no
+          GSSAPIAuthentication no
+          HostbasedAuthentication no
+          AllowUsers thefutureisprivate
+          PermitUserEnvironment no
+          PermitUserRC no
+          AllowAgentForwarding no
+          AllowTcpForwarding local
+          PermitOpen 127.0.0.1:8080
+          GatewayPorts no
+          PermitTunnel no
+          X11Forwarding no
+          Compression no
+          LoginGraceTime 10
+          MaxAuthTries 2
+          MaxSessions 2
+          MaxStartups 10:30:30
+          TCPKeepAlive no
+          ClientAliveInterval 300
+          ClientAliveCountMax 2
+    - path: /etc/containers/containers.conf.d/90-gvisor.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          [engine.runtimes]
+          runsc = ["/usr/local/bin/runsc"]
+    - path: /etc/NetworkManager/conf.d/60-fcos-encrypted-dns.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          [main]
+          dns=none
+          systemd-resolved=false
+    - path: /etc/systemd/resolved.conf.d/60-fcos-encrypted-dns.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          [Resolve]
+          DNS=
+          DNS=1.1.1.1#one.one.one.one 1.0.0.1#one.one.one.one 2606:4700:4700::1111#one.one.one.one 2606:4700:4700::1001#one.one.one.one
+          FallbackDNS=
+          Domains=
+          Domains=~.
+          DNSSEC=yes
+          DNSOverTLS=yes
+          LLMNR=no
+          MulticastDNS=no
+    - path: /etc/sysctl.d/60-fcos-hardening.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          dev.tty.ldisc_autoload = 0
+          fs.protected_fifos = 2
+          fs.protected_hardlinks = 1
+          fs.protected_regular = 2
+          fs.protected_symlinks = 1
+          fs.binfmt_misc.status = 0
+          fs.suid_dumpable = 0
+          kernel.core_pattern = |/bin/false
+          kernel.dmesg_restrict = 1
+          kernel.kexec_load_disabled = 1
+          kernel.kptr_restrict = 2
+          kernel.oops_limit = 100
+          kernel.panic = -1
+          kernel.panic_on_oops = 1
+          kernel.perf_event_paranoid = 4
+          kernel.printk = 3 3 3 3
+          kernel.randomize_va_space = 2
+          kernel.sysrq = 0
+          kernel.unprivileged_bpf_disabled = 1
+          kernel.warn_limit = 100
+          kernel.yama.ptrace_scope = 1
+          net.core.bpf_jit_harden = 2
+          net.ipv4.conf.all.accept_redirects = 0
+          net.ipv4.conf.all.accept_source_route = 0
+          net.ipv4.conf.all.log_martians = 1
+          net.ipv4.conf.all.rp_filter = 2
+          net.ipv4.conf.all.secure_redirects = 0
+          net.ipv4.conf.all.send_redirects = 0
+          net.ipv4.conf.default.accept_redirects = 0
+          net.ipv4.conf.default.accept_source_route = 0
+          net.ipv4.conf.default.log_martians = 1
+          net.ipv4.conf.default.rp_filter = 2
+          net.ipv4.conf.default.secure_redirects = 0
+          net.ipv4.conf.default.send_redirects = 0
+          net.ipv4.icmp_echo_ignore_broadcasts = 1
+          net.ipv4.icmp_ignore_bogus_error_responses = 1
+          net.ipv4.ip_forward = 1
+          net.ipv4.tcp_rfc1337 = 1
+          net.ipv4.tcp_syncookies = 1
+          net.ipv6.conf.all.accept_redirects = 0
+          net.ipv6.conf.all.accept_source_route = 0
+          net.ipv6.conf.all.forwarding = 1
+          net.ipv6.conf.default.accept_redirects = 0
+          net.ipv6.conf.default.accept_source_route = 0
+          vm.mmap_rnd_bits = 32
+          vm.mmap_rnd_compat_bits = 16
+          vm.unprivileged_userfaultfd = 0
+    - path: /etc/chrony.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      append:
+        - inline: |
+
+            # Load administrator policy without replacing Fedora's configuration.
+            confdir /etc/chrony.d
+    - path: /etc/chrony.d/60-fcos-hardening.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          server time.cloudflare.com iburst nts
+          server ntppool1.time.nl iburst nts
+          server nts.netnod.se iburst nts
+          server ptbtime1.ptb.de iburst nts
+          server time.dfm.dk iburst nts
+          server time.cifelli.xyz iburst nts
+
+          minsources 3
+          authselectmode require
+          dscp 46
+          dumpdir /var/lib/chrony
+          rtconutc
+          cmdport 0
+          noclientlog
+    - path: /etc/modprobe.d/60-fcos-hardening.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          # Unsupported and legacy network protocols.
+          install af_key /bin/false
+          install appletalk /bin/false
+          install atm /bin/false
+          install ax25 /bin/false
+          install bluetooth /bin/false
+          install cramfs /bin/false
+          install dccp /bin/false
+          install decnet /bin/false
+          install econet /bin/false
+          install esp4 /bin/false
+          install esp6 /bin/false
+          install freevxfs /bin/false
+          install hfs /bin/false
+          install hfsplus /bin/false
+          install ipcomp /bin/false
+          install ipcomp6 /bin/false
+          install ipx /bin/false
+          install jffs2 /bin/false
+          install l2tp_core /bin/false
+          install l2tp_ppp /bin/false
+          install netrom /bin/false
+          install rds /bin/false
+          install rose /bin/false
+          install sctp /bin/false
+          install tipc /bin/false
+          install udf /bin/false
+          install x25 /bin/false
+          install xfrm_user /bin/false
+
+          # Remote, clustered, and unused filesystems.
+          install 9p /bin/false
+          install 9pnet /bin/false
+          install ceph /bin/false
+          install cifs /bin/false
+          install coda /bin/false
+          install gfs2 /bin/false
+          install jfs /bin/false
+          install ksmbd /bin/false
+          install nfs /bin/false
+          install nfsd /bin/false
+          install nilfs2 /bin/false
+          install ocfs2 /bin/false
+          install orangefs /bin/false
+          install reiserfs /bin/false
+          install sunrpc /bin/false
+
+          # Hardware absent from a headless Hetzner virtual machine.
+          install btusb /bin/false
+          install cdrom /bin/false
+          install firewire_core /bin/false
+          install floppy /bin/false
+          install gameport /bin/false
+          install lp /bin/false
+          install parport /bin/false
+          install parport_pc /bin/false
+          install ppdev /bin/false
+          install sr_mod /bin/false
+          install thunderbolt /bin/false
+
+          # Kernel test and fault-injection drivers.
+          install aer_inject /bin/false
+          install dummy_hcd /bin/false
+          install hwpoison_inject /bin/false
+          install mce_inject /bin/false
+          install nandsim /bin/false
+          install netconsole /bin/false
+          install scsi_debug /bin/false
+          install vivid /bin/false
+    - path: /etc/security/limits.d/30-disable-coredump.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          * soft core 0
+          * hard core 0
+    - path: /etc/systemd/coredump.conf.d/disable.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          [Coredump]
+          Storage=none
+          ProcessSizeMax=0
+    - path: /etc/systemd/system.conf.d/60-disable-coredump.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          [Manager]
+          DumpCore=no
+    - path: /etc/systemd/user.conf.d/60-disable-coredump.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          [Manager]
+          DumpCore=no
+    - path: /etc/systemd/journald.conf.d/60-fcos-hardening.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          [Journal]
+          Storage=persistent
+          Compress=yes
+          Seal=yes
+          SystemMaxUse=512M
+          SystemMaxFileSize=64M
+          MaxRetentionSec=14day
+          MaxFileSec=1day
+          ForwardToWall=no
+    - path: /usr/local/sbin/install-gvisor
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        local: files/install-gvisor.sh
+
+systemd:
+  units:
+    - name: gvisor-install.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Install the checksum-pinned gVisor runtime
+        Documentation=https://gvisor.dev/docs/user_guide/install/
+        Wants=network-online.target
+        After=network-online.target
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/local/sbin/install-gvisor
+        RuntimeDirectory=gvisor-install
+        WorkingDirectory=/run/gvisor-install
+        UMask=0022
+        NoNewPrivileges=yes
+        PrivateDevices=yes
+        PrivateTmp=yes
+        ProtectClock=yes
+        ProtectControlGroups=yes
+        ProtectHome=yes
+        ProtectHostname=yes
+        ProtectKernelLogs=yes
+        ProtectKernelModules=yes
+        ProtectKernelTunables=yes
+        ProtectProc=invisible
+        ProtectSystem=strict
+        ProcSubset=pid
+        ReadWritePaths=/usr/local/bin /usr/local/share/gvisor
+        RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+        RestrictNamespaces=yes
+        RestrictRealtime=yes
+        RestrictSUIDSGID=yes
+        SystemCallArchitectures=native
+
+        [Install]
+        WantedBy=multi-user.target
+    - name: debug-shell.service
+      mask: true
+    - name: kdump.service
+      mask: true
+    - name: rpm-ostree-countme.timer
+      mask: true
+    - name: sshd-vsock.socket
+      mask: true
+    - name: sshd-unix-local.socket
+      mask: true
+    - name: systemd-resolved.service
+      enabled: true
+    - name: systemd-coredump.socket
+      mask: true
+    - name: systemd-coredump@.service
+      mask: true
