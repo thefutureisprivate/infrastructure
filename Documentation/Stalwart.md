@@ -12,9 +12,10 @@ Use these values during the Stalwart setup flow:
 | Administrator contact | `contact@thefutureisprivate.dev` |
 | Account management | Stalwart Web UI |
 
-The public services are SMTP federation on 25, HTTPS/JMAP/admin on 443,
-implicit-TLS submission on 465, and IMAPS on 993. Authenticated clients must
-use 443, 465, or 993, where TLS begins with the first byte. Port 25 cannot use
+The public services are SMTP federation on 25,
+HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin on 443, implicit-TLS submission on 465,
+and IMAPS on 993. Authenticated clients must use 443, 465, or 993, where TLS
+begins with the first byte. Port 25 cannot use
 implicit TLS because Internet SMTP delivery begins in cleartext and upgrades
 with STARTTLS; Stalwart authentication is disabled there, so it is not a
 client-submission exception. POP3, ManageSieve, cleartext HTTP, ports 143 and
@@ -57,7 +58,9 @@ administrator, and store a unique password in a password manager. The normal
 Do not run this step until the permanent certificate and
 `https://mail.thefutureisprivate.dev` are working. The plan in
 `Stalwart/hardening.ndjson` reconciles the complete listener set, so applying it
-also removes Stalwart's bootstrap HTTP, POP3S, and ManageSieve defaults.
+also removes Stalwart's bootstrap HTTP, POP3S, and ManageSieve defaults. The
+HTTPS listener serves JMAP and all DAV protocols without another port or
+listener.
 
 In the administrator UI, create an API key for the administrator account under
 Account › Credentials › API Keys. Name it `infrastructure-hardening`, use
@@ -71,6 +74,8 @@ Account › Credentials › API Keys. Name it `infrastructure-hardening`, use
 - `sysNetworkListenerQuery`;
 - `sysHttpGet`;
 - `sysHttpUpdate`;
+- `sysWebDavGet`;
+- `sysWebDavUpdate`;
 - `sysMtaStageAuthGet`;
 - `sysMtaStageAuthUpdate`;
 - `sysApplicationGet`;
@@ -98,9 +103,9 @@ make stalwart-audit
 The apply command first reads the live settings. It performs no mutation when
 they already match, validates the plan before changing drifted settings, and
 audits again afterwards. The audit also checks the live HTTPS headers and
-performs chain- and hostname-verified implicit-TLS handshakes on ports 465 and
-993. It also reads back the one permitted Application and fails on Web UI
-resource drift.
+CalDAV, CardDAV, and WebDAV routes, then performs chain- and hostname-verified
+implicit-TLS handshakes on ports 465 and 993. It also reads back the one
+permitted Application and fails on Web UI resource drift.
 
 The HTTP policy enables Stalwart's one-year HSTS response, disables permissive
 CORS and forwarded-IP trust, applies authenticated and anonymous request-rate
@@ -112,6 +117,41 @@ and Stalwart's upstream fallback icon. Inline scripts, `eval`, frames, plugins,
 and cross-origin API connections remain blocked. `Cross-Origin-Embedder-Policy`
 is deliberately not enabled because it would break permitted cross-origin
 images unless every upstream response opted in.
+
+The WebDAV policy keeps assisted discovery disabled for standards-compliant,
+privacy-preserving principal discovery and explicitly bounds each account to
+10 locks, a one-hour lock timeout, 1 KiB dead properties, 250-byte live
+properties, 25 MiB request bodies, and 2,000 results per query.
+
+## CalDAV, CardDAV, and WebDAV Clients
+
+Use the permanent HTTPS hostname and a normal Stalwart user account. Accounts
+with Stalwart's default `User` role already receive the DAV permissions. If a
+custom role is used, it must explicitly retain the required `dav*`
+permissions.
+
+Prefer the standard discovery URLs:
+
+| Protocol | URL |
+| --- | --- |
+| CalDAV | `https://mail.thefutureisprivate.dev/.well-known/caldav` |
+| CardDAV | `https://mail.thefutureisprivate.dev/.well-known/carddav` |
+| WebDAV files | `https://mail.thefutureisprivate.dev/dav/file/` |
+
+If a client requires a direct collection URL, Stalwart v0.16 uses the full
+account address as the principal name and the `@` must be percent-encoded. For
+the initial account, use:
+
+```text
+https://mail.thefutureisprivate.dev/dav/cal/contact%40thefutureisprivate.dev
+https://mail.thefutureisprivate.dev/dav/card/contact%40thefutureisprivate.dev
+https://mail.thefutureisprivate.dev/dav/file/contact%40thefutureisprivate.dev
+```
+
+Authenticate as `contact@thefutureisprivate.dev` with its Stalwart password.
+Create additional accounts in the Web UI and substitute their percent-encoded
+full address in direct URLs. Run `make stalwart-harden` after this repository
+change, then `make stalwart-audit` to verify all three public DAV routes.
 
 ## deSEC and Mail Records
 
@@ -176,8 +216,9 @@ other non-authorized DNS names.
 
 Review the generated zone file before each DNS task, monitor the task result,
 and verify the public records from an independent DNSSEC-validating resolver.
-Test inbound SMTP, authenticated outbound submission, IMAP, JMAP, DKIM, SPF,
-DMARC, MTA-STS, and TLS-RPT externally after changes.
+Test inbound SMTP, authenticated outbound submission, IMAP, JMAP, CalDAV,
+CardDAV, WebDAV, DKIM, SPF, DMARC, MTA-STS, and TLS-RPT externally after
+changes.
 
 Legacy Proton MX, SPF, verification, DKIM, and MTA-STS records must not be
 restored as active configuration. Backups are explicitly deferred; production
@@ -189,5 +230,9 @@ Stalwart's current DNS model and supported record set are documented in its
 the [API-key guide](https://stalw.art/docs/auth/authentication/api-key/) defines
 credential scoping, the [declarative deployment guide](https://stalw.art/docs/configuration/declarative-deployments/)
 defines the plan format, and the [HTTP settings reference](https://stalw.art/docs/http/settings/)
-defines global response headers. The bootstrap flow is described in the
-[Docker deployment guide](https://stalw.art/docs/install/platform/docker/).
+defines global response headers. The
+[WebDAV protocol guide](https://stalw.art/docs/http/webdav/) defines the DAV
+paths and discovery endpoints, while the
+[WebDAV settings guide](https://stalw.art/docs/collaboration/webdav/) defines
+the managed limits. The bootstrap flow is described in the [Docker deployment
+guide](https://stalw.art/docs/install/platform/docker/).

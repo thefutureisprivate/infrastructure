@@ -98,6 +98,9 @@ expected_listeners=$(jq -cS -s '
 expected_http=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "Http"))[0].value
 ' "${plan_file}")
+expected_webdav=$(jq -cS -s '
+  map(select(."@type" == "update" and .object == "WebDav"))[0].value
+' "${plan_file}")
 expected_auth=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "MtaStageAuth"))[0].value
 ' "${plan_file}")
@@ -112,17 +115,21 @@ expected_applications=$(jq -cS -s '
 
 actual_listeners=''
 actual_http=''
+actual_webdav=''
 actual_auth=''
 actual_applications=''
 
 read_actual_configuration() {
-  local listener_ndjson http_json auth_json application_ndjson
+  local listener_ndjson http_json webdav_json auth_json application_ndjson
 
   listener_ndjson=$(run_cli query NetworkListener \
     --fields name,bind,protocol,overrideProxyTrustedNetworks,useTls,tlsDisableCipherSuites,tlsDisableProtocols,tlsIgnoreClientOrder,tlsImplicit,tlsTimeout,maxConnections \
     --json) || return 1
   http_json=$(run_cli get Http --fields \
     rateLimitAuthenticated,rateLimitAnonymous,enableHsts,usePermissiveCors,responseHeaders,useXForwarded,redirectRoot \
+    --json) || return 1
+  webdav_json=$(run_cli get WebDav --fields \
+    enableAssistedDiscovery,maxLockTimeout,maxLocks,deadPropertyMaxSize,livePropertyMaxSize,requestMaxSize,maxResults \
     --json) || return 1
   auth_json=$(run_cli get MtaStageAuth --fields \
     maxFailures,waitOnFail,saslMechanisms,mustMatchSender,require \
@@ -143,6 +150,10 @@ read_actual_configuration() {
     rateLimitAuthenticated, rateLimitAnonymous, enableHsts,
     usePermissiveCors, responseHeaders, useXForwarded, redirectRoot
   }' <<<"${http_json}")
+  actual_webdav=$(jq -cS '{
+    enableAssistedDiscovery, maxLockTimeout, maxLocks, deadPropertyMaxSize,
+    livePropertyMaxSize, requestMaxSize, maxResults
+  }' <<<"${webdav_json}")
   actual_auth=$(jq -cS '{
     maxFailures, waitOnFail, saslMechanisms, mustMatchSender, require
   }' <<<"${auth_json}")
@@ -157,6 +168,7 @@ read_actual_configuration() {
 configuration_matches() {
   [[ ${actual_listeners} == "${expected_listeners}" ]] &&
     [[ ${actual_http} == "${expected_http}" ]] &&
+    [[ ${actual_webdav} == "${expected_webdav}" ]] &&
     [[ ${actual_auth} == "${expected_auth}" ]] &&
     [[ ${actual_applications} == "${expected_applications}" ]]
 }
@@ -209,6 +221,26 @@ verify_live_http_headers() {
   printf 'Live HTTPS security headers: verified\n'
 }
 
+verify_live_dav_endpoints() {
+  local path status
+  for path in /.well-known/caldav /.well-known/carddav /dav/file/; do
+    status=$(curl --silent --show-error \
+      --max-time 20 \
+      --output /dev/null \
+      --write-out '%{http_code}' \
+      "${STALWART_URL}${path}")
+    case ${status} in
+      200|301|302|307|308|401)
+        ;;
+      *)
+        printf 'DAV endpoint %s returned unexpected HTTP status %s\n' "${path}" "${status}" >&2
+        return 1
+        ;;
+    esac
+  done
+  printf 'CalDAV, CardDAV, and WebDAV HTTPS endpoints: verified\n'
+}
+
 verify_implicit_tls() {
   local authority host port
   authority=${STALWART_URL#https://}
@@ -238,6 +270,7 @@ audit() {
   if ! configuration_matches; then
     show_drift NetworkListener "${expected_listeners}" "${actual_listeners}"
     show_drift Http "${expected_http}" "${actual_http}"
+    show_drift WebDav "${expected_webdav}" "${actual_webdav}"
     show_drift MtaStageAuth "${expected_auth}" "${actual_auth}"
     show_drift Application "${expected_applications}" "${actual_applications}"
     return 1
@@ -245,6 +278,7 @@ audit() {
 
   printf 'Stalwart declarative hardening: in sync\n'
   verify_live_http_headers
+  verify_live_dav_endpoints
   verify_implicit_tls
 }
 
@@ -257,6 +291,7 @@ read_actual_configuration
 if configuration_matches; then
   printf 'Stalwart declarative hardening: already in sync\n'
   verify_live_http_headers
+  verify_live_dav_endpoints
   verify_implicit_tls
   exit
 fi

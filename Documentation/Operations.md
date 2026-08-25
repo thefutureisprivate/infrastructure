@@ -43,9 +43,10 @@ make stalwart-audit
 
 The first target compares the live managed fields and skips the apply when
 there is no drift. The audit is read-only: it verifies the exact listener,
-HTTP, and SMTP-auth settings, checks all configured security headers on a live
-HTTPS response, and validates the certificates presented by ports 465 and 993.
-It fails if any extra Stalwart listener exists.
+HTTP, WebDAV, and SMTP-auth settings, checks all configured security headers
+and the CalDAV, CardDAV, and WebDAV routes over live HTTPS, and validates the
+certificates presented by ports 465 and 993. It fails if any extra Stalwart
+listener exists.
 
 ## Service Diagnostics
 

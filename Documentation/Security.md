@@ -116,9 +116,10 @@ setup.
 ## Stalwart Boundary
 
 The production plan reconciles the listener collection rather than merely
-adding preferred listeners. Only federated SMTP on 25, HTTPS/JMAP/admin on 443,
-implicit-TLS submission on 465, and IMAPS on 993 survive reconciliation. POP3,
-ManageSieve, cleartext HTTP, and STARTTLS client ports 143 and 587 are removed.
+adding preferred listeners. Only federated SMTP on 25,
+HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin on 443, implicit-TLS submission on 465,
+and IMAPS on 993 survive reconciliation. POP3, ManageSieve, cleartext HTTP, and
+STARTTLS client ports 143 and 587 are removed.
 SMTP port 25 remains non-implicit for Internet federation, but AUTH is disabled
 on that port; SMTP client authentication of every kind is offered only when
 TLS is already active on a non-federation listener.
@@ -132,10 +133,16 @@ EventSource, stylesheet, image, and inline-style needs. COEP is intentionally
 omitted because enforcing it would break cross-origin resources which do not
 opt in; COOP and CORP remain enabled.
 
+The WebDAV singleton explicitly bounds locks, property sizes, request bodies,
+and result counts. Assisted discovery stays disabled so standards-compliant
+clients discover only resources exposed through normal principal properties;
+the public audit verifies the CalDAV, CardDAV, and file-WebDAV routes without
+handling user credentials.
+
 The hardening client reads and compares the managed live fields before
 applying, so a matching second run performs no server mutation. Its audit then
-checks the configuration through Stalwart's API, the headers on a live HTTPS
-response, and certificate validation on ports 465 and 993.
+checks the configuration through Stalwart's API, the headers and DAV routes on
+live HTTPS responses, and certificate validation on ports 465 and 993.
 
 ## Secret Boundary
 
@@ -158,7 +165,8 @@ the desired SHA-256 hash in a root-only directory to support idempotence.
 The Stalwart configuration key is never installed on the server; it is exposed
 only to the one local CLI child process. Its Replace-mode permission set covers
 only the authentication prerequisite and the NetworkListener, Application,
-Http, and MtaStageAuth objects; the key cannot authenticate to a mail protocol.
+Http, WebDav, and MtaStageAuth objects; the key cannot authenticate to a mail
+or DAV protocol.
 
 OpenTofu state still contains the generated Stalwart token. A `sensitive`
 output hides normal CLI display but does not encrypt state. Local ignored state

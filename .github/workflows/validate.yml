@@ -70,16 +70,19 @@ jobs:
       - name: "Validate Stalwart hardening plan"
         run: >-
           jq -e -s
-          'length == 4
-          and map(."@type") == ["reconcile", "update", "update", "reconcile"]
-          and map(.object) == ["NetworkListener", "Http", "MtaStageAuth", "Application"]
+          'length == 5
+          and map(."@type") == ["reconcile", "update", "update", "update", "reconcile"]
+          and map(.object) == ["NetworkListener", "Http", "WebDav", "MtaStageAuth", "Application"]
           and (.[0].value | keys | sort) == ["https", "imaps", "smtp", "submissions"]
           and .[1].value.enableHsts == true
           and .[1].value.usePermissiveCors == false
           and .[1].value.useXForwarded == false
           and (.[1].value.responseHeaders["Content-Security-Policy"] | length > 0)
-          and .[3].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip"
-          and (.[3].value.webui.urlPrefix | keys | sort) == ["/account", "/admin"]'
+          and .[2].value.enableAssistedDiscovery == false
+          and .[2].value.requestMaxSize == 26214400
+          and .[2].value.maxResults == 2000
+          and .[4].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip"
+          and (.[4].value.webui.urlPrefix | keys | sort) == ["/account", "/admin"]'
           Stalwart/hardening.ndjson >/dev/null
 
       - name: "Check YAML"

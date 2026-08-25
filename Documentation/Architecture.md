@@ -65,7 +65,7 @@ flowchart LR
 | `OpenTofu/` | Hetzner servers, shared base firewall, role firewall, placement, backups, protection, per-node reverse DNS, apex-deny and mail-specific CAA, selected shared deSEC RRsets, A/AAAA records, exact-name Stalwart token | Zone lifecycle and authorized mail-domain record contents managed natively by Stalwart |
 | `SOPS/` | Encrypted provider and application credentials, age recipient policy, secret handoff helpers | Infrastructure state or persistent application data |
 | `Ansible/` | Group-scoped Podman secrets, Quadlet source files, support files, networks, volumes, and service reconciliation | Host boot configuration or cloud lifecycle |
-| `Stalwart/` | Exact TLS listeners, verified local Web UI Application, HTTP security headers and CSP, HTTP rate limits, and SMTP authentication policy | Domains, accounts, certificates, DNS publication, or mail routing policy |
+| `Stalwart/` | Exact TLS listeners, verified local Web UI Application, HTTP security headers and CSP, HTTP and DAV resource limits, and SMTP authentication policy | Domains, accounts, certificates, DNS publication, or mail routing policy |
 | Stalwart | Mail service configuration and explicitly authorized DNS owner/type pairs | Zone lifecycle, CAA/HTTPS records, unrelated names, address records, reverse DNS, TLSA, or token management |
 | PostgreSQL | Stalwart relational data | Host networking or external database access |
 
@@ -101,7 +101,8 @@ flowchart LR
 9. After certificate bootstrap, the pinned Stalwart CLI reconciles the
    committed hardening plan through a least-privilege SOPS-backed API key. It
    skips the mutation when the managed live fields already match and audits
-   configuration, HTTPS headers, and implicit-TLS handshakes afterwards.
+   configuration, HTTPS headers, DAV routes, and implicit-TLS handshakes
+   afterwards.
 
 Ignition is a first-boot mechanism. Changes under `Butane/` do not reconcile an
 already installed host; rebuild the server when those files change.
@@ -112,7 +113,7 @@ already installed host; rebuild the server when those files change.
 | --- | --- | --- | --- |
 | PostgreSQL | None; private `mail` network only | `mail-postgres-data` named volume | gVisor `runsc` |
 | Stalwart SMTP | TCP 25 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
-| Stalwart HTTPS/JMAP/admin | TCP 443 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
+| Stalwart HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin | TCP 443 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart submission | TCP 465, implicit TLS | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart IMAP | TCP 993, implicit TLS | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart bootstrap HTTP | Temporary `127.0.0.1:8080` opt-in only | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
@@ -150,7 +151,7 @@ recorded in [DNS Ownership](DNS.md).
 | --- | --- | --- |
 | Provider credentials | `SOPS/infrastructure.sops.yaml` | SOPS-encrypted to committed age recipients |
 | Mail credentials | `SOPS/mail.sops.yaml` | SOPS-encrypted to committed age recipients |
-| Stalwart hardening API key | `SOPS/mail.sops.yaml` | Replace-mode permissions limited to the four managed object types; supplied only to the local CLI process |
+| Stalwart hardening API key | `SOPS/mail.sops.yaml` | Replace-mode permissions limited to the five managed object types; supplied only to the local CLI process |
 | deSEC child token | OpenTofu state and encrypted mail scope | Sensitive output plus SOPS encryption; state itself must be protected separately |
 | OpenTofu state | Local by default | Ignored by Git; use an encrypted, access-controlled remote backend for shared automation |
 | Generated inventory and host keys | `Ansible/inventory/` | Ignored by Git; inventory mode is `0600` |

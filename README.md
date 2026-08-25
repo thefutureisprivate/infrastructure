@@ -69,8 +69,8 @@ deployment. The full lifecycle and trust boundaries are documented in
   checksum-pinned gVisor bundle is installed.
 - Sends host DNS exclusively through authenticated Cloudflare DNS-over-TLS,
   with DNSSEC validation and no plaintext fallback.
-- Keeps PostgreSQL off the host network and publishes only SMTP, HTTPS/JMAP,
-  implicit-TLS submission, and IMAPS. The temporary bootstrap listener is
+- Keeps PostgreSQL off the host network and publishes only SMTP,
+  HTTPS/JMAP/CalDAV/CardDAV/WebDAV, implicit-TLS submission, and IMAPS. The temporary bootstrap listener is
   opt-in and bound to loopback only.
 - Reconciles the exact production listeners, permits password authentication
   only after TLS is active, disables permissive CORS and forwarded-IP trust,
@@ -98,8 +98,10 @@ Security controls are applied at every layer:
   filesystems, private networking, PostgreSQL no-new-privileges, and
   systemd-managed restart ordering.
 - **Stalwart:** client protocols use implicit TLS only; SMTP port 25 remains a
-  non-authenticated federation listener with STARTTLS. A declarative plan
-  removes POP3, ManageSieve, cleartext HTTP, and STARTTLS client listeners.
+  non-authenticated federation listener with STARTTLS. CalDAV, CardDAV, and
+  WebDAV share the hardened HTTPS listener and have explicit resource bounds.
+  A declarative plan removes POP3, ManageSieve, cleartext HTTP, and STARTTLS
+  client listeners.
 - **Secrets:** separate encrypted provider and mail scopes; decrypted values
   enter only the child process that needs them. Ansible creates Podman secrets
   over standard input and renders no credentials into Quadlets.
