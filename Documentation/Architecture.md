@@ -112,7 +112,7 @@ already installed host; rebuild the server when those files change.
 | Service | Host exposure | Persistent state | Runtime |
 | --- | --- | --- | --- |
 | PostgreSQL | None; private `mail` network only | `mail-postgres-data` named volume | gVisor `runsc` |
-| Stalwart SMTP federation | TCP 25, STARTTLS 1.2/1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
+| Stalwart SMTP federation | TCP 25, mandatory STARTTLS 1.2/1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin | TCP 443, TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart submission | TCP 465, implicit TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart IMAP | TCP 993, implicit TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |

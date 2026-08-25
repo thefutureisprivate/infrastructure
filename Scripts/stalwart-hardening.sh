@@ -104,6 +104,9 @@ expected_webdav=$(jq -cS -s '
 expected_auth=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "MtaStageAuth"))[0].value
 ' "${plan_file}")
+expected_mail=$(jq -cS -s '
+  map(select(."@type" == "update" and .object == "MtaStageMail"))[0].value
+' "${plan_file}")
 expected_applications=$(jq -cS -s '
   def managed: {
     enabled, description, resourceUrl, urlPrefix,
@@ -117,10 +120,11 @@ actual_listeners=''
 actual_http=''
 actual_webdav=''
 actual_auth=''
+actual_mail=''
 actual_applications=''
 
 read_actual_configuration() {
-  local listener_ndjson http_json webdav_json auth_json application_ndjson
+  local listener_ndjson http_json webdav_json auth_json mail_json application_ndjson
 
   listener_ndjson=$(run_cli query NetworkListener \
     --fields name,bind,protocol,overrideProxyTrustedNetworks,useTls,tlsDisableCipherSuites,tlsDisableProtocols,tlsIgnoreClientOrder,tlsImplicit,tlsTimeout,maxConnections \
@@ -133,6 +137,9 @@ read_actual_configuration() {
     --json) || return 1
   auth_json=$(run_cli get MtaStageAuth --fields \
     maxFailures,waitOnFail,saslMechanisms,mustMatchSender,require \
+    --json) || return 1
+  mail_json=$(run_cli get MtaStageMail --fields \
+    isSenderAllowed \
     --json) || return 1
   application_ndjson=$(run_cli query Application --fields \
     enabled,description,resourceUrl,urlPrefix,autoUpdateFrequency,unpackDirectory,oauthClientId \
@@ -157,6 +164,7 @@ read_actual_configuration() {
   actual_auth=$(jq -cS '{
     maxFailures, waitOnFail, saslMechanisms, mustMatchSender, require
   }' <<<"${auth_json}")
+  actual_mail=$(jq -cS '{isSenderAllowed}' <<<"${mail_json}")
   actual_applications=$(jq -cS -s '
     map({
       enabled, description, resourceUrl, urlPrefix,
@@ -170,6 +178,7 @@ configuration_matches() {
     [[ ${actual_http} == "${expected_http}" ]] &&
     [[ ${actual_webdav} == "${expected_webdav}" ]] &&
     [[ ${actual_auth} == "${expected_auth}" ]] &&
+    [[ ${actual_mail} == "${expected_mail}" ]] &&
     [[ ${actual_applications} == "${expected_applications}" ]]
 }
 
@@ -242,7 +251,7 @@ verify_live_dav_endpoints() {
 }
 
 verify_tls_policy() {
-  local authority host port
+  local authority banner ehlo_complete ehlo_line host mail_response port smtp_fd starttls_advertised
   authority=${STALWART_URL#https://}
   authority=${authority%%/*}
   host=${authority%%:*}
@@ -285,7 +294,59 @@ verify_tls_policy() {
     return 1
   fi
 
-  printf 'Client TLS 1.3 floor and SMTP federation TLS 1.2 compatibility: verified\n'
+  if ! exec {smtp_fd}<>"/dev/tcp/${host}/25"; then
+    printf 'Unable to connect to SMTP federation endpoint %s:25\n' "${host}" >&2
+    return 1
+  fi
+  if ! IFS= read -r -t 20 banner <&"${smtp_fd}" || [[ ${banner%$'\r'} != 220\ * ]]; then
+    printf 'SMTP federation endpoint %s:25 returned an invalid greeting\n' "${host}" >&2
+    exec {smtp_fd}>&-
+    return 1
+  fi
+  printf 'EHLO tls-policy-audit.invalid\r\n' >&"${smtp_fd}"
+  ehlo_complete=false
+  starttls_advertised=false
+  while IFS= read -r -t 20 ehlo_line <&"${smtp_fd}"; do
+    ehlo_line=${ehlo_line%$'\r'}
+    if [[ ${ehlo_line} == 250-*STARTTLS* || ${ehlo_line} == '250 STARTTLS' ]]; then
+      starttls_advertised=true
+    fi
+    if [[ ${ehlo_line} == 250\ * ]]; then
+      ehlo_complete=true
+      break
+    fi
+    if [[ ${ehlo_line} != 250-* ]]; then
+      printf 'SMTP federation endpoint %s:25 returned an invalid EHLO response\n' "${host}" >&2
+      exec {smtp_fd}>&-
+      return 1
+    fi
+  done
+  if [[ ${ehlo_complete} != true ]]; then
+    printf 'SMTP federation endpoint %s:25 did not complete its EHLO response\n' "${host}" >&2
+    exec {smtp_fd}>&-
+    return 1
+  fi
+  if [[ ${starttls_advertised} != true ]]; then
+    printf 'SMTP federation endpoint %s:25 did not advertise STARTTLS\n' "${host}" >&2
+    exec {smtp_fd}>&-
+    return 1
+  fi
+  printf 'MAIL FROM:<>\r\n' >&"${smtp_fd}"
+  if ! IFS= read -r -t 20 mail_response <&"${smtp_fd}"; then
+    printf 'SMTP federation endpoint %s:25 did not answer a plaintext MAIL command\n' "${host}" >&2
+    exec {smtp_fd}>&-
+    return 1
+  fi
+  mail_response=${mail_response%$'\r'}
+  printf 'QUIT\r\n' >&"${smtp_fd}" || true
+  exec {smtp_fd}>&-
+  if [[ ${mail_response} != [45][0-9][0-9]\ * ]]; then
+    printf 'SMTP federation endpoint %s:25 accepted plaintext MAIL: %s\n' \
+      "${host}" "${mail_response}" >&2
+    return 1
+  fi
+
+  printf 'Client TLS 1.3 floor and mandatory SMTP STARTTLS with TLS 1.2 compatibility: verified\n'
 }
 
 audit() {
@@ -295,6 +356,7 @@ audit() {
     show_drift Http "${expected_http}" "${actual_http}"
     show_drift WebDav "${expected_webdav}" "${actual_webdav}"
     show_drift MtaStageAuth "${expected_auth}" "${actual_auth}"
+    show_drift MtaStageMail "${expected_mail}" "${actual_mail}"
     show_drift Application "${expected_applications}" "${actual_applications}"
     return 1
   fi

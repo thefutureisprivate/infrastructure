@@ -98,8 +98,9 @@ Security controls are applied at every layer:
   filesystems, private networking, PostgreSQL no-new-privileges, and
   systemd-managed restart ordering.
 - **Stalwart:** client protocols use implicit TLS only; SMTP port 25 remains a
-  non-authenticated federation listener with STARTTLS. HTTPS, submission, and
-  IMAPS require TLS 1.3; SMTP federation retains TLS 1.2 compatibility.
+  non-authenticated federation listener with mandatory STARTTLS before message
+  transfer. HTTPS, submission, and IMAPS require TLS 1.3; SMTP federation
+  retains TLS 1.2 compatibility.
   CalDAV, CardDAV, and WebDAV share the hardened HTTPS listener and have
   explicit resource bounds. A declarative plan removes POP3, ManageSieve,
   cleartext HTTP, and STARTTLS client listeners.

@@ -43,10 +43,11 @@ make stalwart-audit
 
 The first target compares the live managed fields and skips the apply when
 there is no drift. The audit is read-only: it verifies the exact listener,
-HTTP, WebDAV, and SMTP-auth settings, checks all configured security headers
-and the CalDAV, CardDAV, and WebDAV routes over live HTTPS, requires TLS 1.3 on
-ports 443, 465, and 993, and verifies TLS 1.2 STARTTLS compatibility on the SMTP
-federation listener. It fails if any extra Stalwart listener exists or a client
+HTTP, WebDAV, SMTP-auth, and MAIL-stage settings, checks all configured security
+headers and the CalDAV, CardDAV, and WebDAV routes over live HTTPS, requires TLS
+1.3 on ports 443, 465, and 993, and verifies TLS 1.2 STARTTLS compatibility on
+the SMTP federation listener. It also fails if that listener accepts an
+unencrypted `MAIL FROM`, if any extra Stalwart listener exists, or if a client
 listener accepts TLS 1.2.
 
 ## Service Diagnostics

@@ -14,9 +14,9 @@ printf 'Shell syntax: OK\n'
 "${repo_root}/Tests/sops-allowlist.sh"
 
 jq -e -s '
-  length == 5 and
-  (map(."@type") == ["reconcile", "update", "update", "update", "reconcile"]) and
-  (map(.object) == ["NetworkListener", "Http", "WebDav", "MtaStageAuth", "Application"]) and
+  length == 6 and
+  (map(."@type") == ["reconcile", "update", "update", "update", "update", "reconcile"]) and
+  (map(.object) == ["NetworkListener", "Http", "WebDav", "MtaStageAuth", "MtaStageMail", "Application"]) and
   (.[0].value | keys | sort == ["https", "imaps", "smtp", "submissions"]) and
   (.[0].value.smtp.tlsImplicit == false) and
   (.[0].value.submissions.tlsImplicit == true) and
@@ -39,8 +39,9 @@ jq -e -s '
     "requestMaxSize": 26214400,
     "maxResults": 2000
   })
-  and (.[4].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip")
-  and (.[4].value.webui.urlPrefix | keys | sort == ["/account", "/admin"])
+  and (.[4].value.isSenderAllowed.else == "is_tls && (!is_empty(authenticated_as) || !key_exists(\u0027spam-block\u0027, sender_domain))")
+  and (.[5].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip")
+  and (.[5].value.webui.urlPrefix | keys | sort == ["/account", "/admin"])
 ' "${repo_root}/Stalwart/hardening.ndjson" >/dev/null
 printf 'Stalwart hardening plan: OK\n'
 

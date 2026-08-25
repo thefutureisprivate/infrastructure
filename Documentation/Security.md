@@ -121,13 +121,16 @@ HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin on 443, implicit-TLS submission on 465,
 and IMAPS on 993 survive reconciliation. POP3, ManageSieve, cleartext HTTP, and
 STARTTLS client ports 143 and 587 are removed.
 SMTP port 25 remains non-implicit for Internet federation, but AUTH is disabled
-on that port; SMTP client authentication of every kind is offered only when
-TLS is already active on a non-federation listener.
+on that port and the MAIL stage rejects senders until STARTTLS succeeds. SMTP
+client authentication of every kind is offered only when TLS is already active
+on a non-federation listener.
 
 The authenticated client listeners on ports 443, 465, and 993 disable TLS 1.2
 and therefore require TLS 1.3. The port 25 federation listener deliberately
 keeps both TLS 1.2 and TLS 1.3 available for inbound server-to-server STARTTLS;
-outbound SMTP negotiation is unchanged. Stalwart's TLS library does not offer
+the upgrade is mandatory before message transfer. This matches GrapheneOS's
+receiving policy while preserving compatibility with TLS 1.2-speaking MTAs.
+Outbound SMTP negotiation is unchanged. Stalwart's TLS library does not offer
 TLS 1.0 or TLS 1.1 on any listener.
 
 The HTTP singleton enables HSTS, keeps permissive CORS and untrusted forwarded
@@ -150,6 +153,8 @@ applying, so a matching second run performs no server mutation. Its audit then
 checks the configuration through Stalwart's API, the headers and DAV routes on
 live HTTPS responses, positive TLS 1.3 and negative TLS 1.2 handshakes on every
 client endpoint, and a positive TLS 1.2 STARTTLS handshake on port 25.
+It also opens a plaintext SMTP session solely to prove that STARTTLS is
+advertised and an unencrypted `MAIL FROM` is rejected.
 
 ## Secret Boundary
 
@@ -172,8 +177,8 @@ the desired SHA-256 hash in a root-only directory to support idempotence.
 The Stalwart configuration key is never installed on the server; it is exposed
 only to the one local CLI child process. Its Replace-mode permission set covers
 only the authentication prerequisite and the NetworkListener, Application,
-Http, WebDav, and MtaStageAuth objects; the key cannot authenticate to a mail
-or DAV protocol.
+Http, WebDav, MtaStageAuth, and MtaStageMail objects; the key cannot
+authenticate to a mail or DAV protocol.
 
 OpenTofu state still contains the generated Stalwart token. A `sensitive`
 output hides normal CLI display but does not encrypt state. Local ignored state

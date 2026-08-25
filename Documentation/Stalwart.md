@@ -17,11 +17,20 @@ HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin on 443, implicit-TLS submission on 465,
 and IMAPS on 993. Authenticated clients must use 443, 465, or 993, where TLS
 1.3 begins with the first byte. Port 25 cannot use
 implicit TLS because Internet SMTP delivery begins in cleartext and upgrades
-with STARTTLS. It continues to offer TLS 1.2 and TLS 1.3 for interoperability
-with other mail servers; Stalwart authentication is disabled there, so it is
-not a client-submission exception. POP3, ManageSieve, cleartext HTTP, ports 143
-and 587, and any other listener are deliberately absent. Outbound SMTP TLS
-policy is unchanged and continues to negotiate with receiving mail servers.
+with STARTTLS. The server advertises STARTTLS but refuses `MAIL FROM` until the
+upgrade succeeds. It offers TLS 1.2 and TLS 1.3 for interoperability with other
+mail servers; Stalwart authentication is disabled there, so it is not a
+client-submission exception. POP3, ManageSieve, cleartext HTTP, ports 143 and
+587, and any other listener are deliberately absent. Outbound SMTP TLS policy
+is unchanged and continues to negotiate with receiving mail servers.
+
+This mirrors GrapheneOS's current receiving policy: its Postfix
+[`smtpd_tls_security_level = encrypt`](https://github.com/GrapheneOS/mail.grapheneos.org/blob/main/postfix/main.cf#L66)
+requires STARTTLS for inbound SMTP, while its inbound protocol floor remains
+TLS 1.2. Its authenticated
+[`submissions` service](https://github.com/GrapheneOS/mail.grapheneos.org/blob/main/postfix/master.cf#L7-L18)
+raises that floor to TLS 1.3. Requiring STARTTLS on port 25 intentionally rejects
+delivery from legacy mail servers which cannot negotiate TLS 1.2 or newer.
 
 ## Secure Bootstrap
 
@@ -80,6 +89,8 @@ Account › Credentials › API Keys. Name it `infrastructure-hardening`, use
 - `sysWebDavUpdate`;
 - `sysMtaStageAuthGet`;
 - `sysMtaStageAuthUpdate`;
+- `sysMtaStageMailGet`;
+- `sysMtaStageMailUpdate`;
 - `sysApplicationGet`;
 - `sysApplicationCreate`;
 - `sysApplicationUpdate`;
@@ -107,8 +118,9 @@ they already match, validates the plan before changing drifted settings, and
 audits again afterwards. The audit also checks the live HTTPS headers and
 CalDAV, CardDAV, and WebDAV routes. It requires successful TLS 1.3 handshakes
 and rejected TLS 1.2 handshakes on ports 443, 465, and 993, then verifies that
-SMTP federation on port 25 still accepts TLS 1.2 through STARTTLS. It also reads
-back the one permitted Application and fails on Web UI resource drift.
+SMTP federation on port 25 accepts TLS 1.2 through STARTTLS but rejects a
+plaintext `MAIL FROM`. It also reads back the one permitted Application and
+fails on Web UI resource drift.
 
 The HTTP policy enables Stalwart's one-year HSTS response, disables permissive
 CORS and forwarded-IP trust, applies authenticated and anonymous request-rate
