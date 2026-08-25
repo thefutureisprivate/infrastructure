@@ -201,4 +201,3 @@ guidance live in [Operations](Documentation/Operations.md).
 - [Operations](Documentation/Operations.md)
 - [Stalwart Production Setup](Documentation/Stalwart.md)
 - [Security Model](Documentation/Security.md)
-- [Security Finding Closure](Documentation/Security-Audit.md)

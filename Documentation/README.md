@@ -17,8 +17,6 @@ infrastructure repository.
   secure bootstrap tunnel, DNS/ACME settings, listeners, and Web UI workflow.
 - [Security Model](Security.md) records trust assumptions, layered controls,
   secret boundaries, and residual risks.
-- [Security Finding Closure](Security-Audit.md) records the finding-by-finding
-  remediation and verification evidence for the initial production review.
 
 Start with [Deployment](Deployment.md) when building a new environment. Read
 [Architecture](Architecture.md) and [Security Model](Security.md) before
