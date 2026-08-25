@@ -22,6 +22,10 @@ jq -e -s '
   (.[0].value.submissions.tlsImplicit == true) and
   (.[0].value.imaps.tlsImplicit == true) and
   (.[0].value.https.tlsImplicit == true) and
+  (.[0].value.smtp.tlsDisableProtocols == {}) and
+  (.[0].value.submissions.tlsDisableProtocols == {"tls12": true}) and
+  (.[0].value.imaps.tlsDisableProtocols == {"tls12": true}) and
+  (.[0].value.https.tlsDisableProtocols == {"tls12": true}) and
   (.[1].value.enableHsts == true) and
   (.[1].value.usePermissiveCors == false) and
   (.[1].value.useXForwarded == false) and

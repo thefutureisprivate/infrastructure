@@ -101,8 +101,8 @@ flowchart LR
 9. After certificate bootstrap, the pinned Stalwart CLI reconciles the
    committed hardening plan through a least-privilege SOPS-backed API key. It
    skips the mutation when the managed live fields already match and audits
-   configuration, HTTPS headers, DAV routes, and implicit-TLS handshakes
-   afterwards.
+   configuration, HTTPS headers, DAV routes, the TLS 1.3 client floor, and SMTP
+   federation TLS 1.2 compatibility afterwards.
 
 Ignition is a first-boot mechanism. Changes under `Butane/` do not reconcile an
 already installed host; rebuild the server when those files change.
@@ -112,10 +112,10 @@ already installed host; rebuild the server when those files change.
 | Service | Host exposure | Persistent state | Runtime |
 | --- | --- | --- | --- |
 | PostgreSQL | None; private `mail` network only | `mail-postgres-data` named volume | gVisor `runsc` |
-| Stalwart SMTP | TCP 25 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
-| Stalwart HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin | TCP 443 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
-| Stalwart submission | TCP 465, implicit TLS | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
-| Stalwart IMAP | TCP 993, implicit TLS | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
+| Stalwart SMTP federation | TCP 25, STARTTLS 1.2/1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
+| Stalwart HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin | TCP 443, TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
+| Stalwart submission | TCP 465, implicit TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
+| Stalwart IMAP | TCP 993, implicit TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart bootstrap HTTP | Temporary `127.0.0.1:8080` opt-in only | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 
 Both containers have read-only root filesystems and explicit writable volumes

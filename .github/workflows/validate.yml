@@ -74,6 +74,10 @@ jobs:
           and map(."@type") == ["reconcile", "update", "update", "update", "reconcile"]
           and map(.object) == ["NetworkListener", "Http", "WebDav", "MtaStageAuth", "Application"]
           and (.[0].value | keys | sort) == ["https", "imaps", "smtp", "submissions"]
+          and .[0].value.smtp.tlsDisableProtocols == {}
+          and .[0].value.submissions.tlsDisableProtocols == {"tls12": true}
+          and .[0].value.imaps.tlsDisableProtocols == {"tls12": true}
+          and .[0].value.https.tlsDisableProtocols == {"tls12": true}
           and .[1].value.enableHsts == true
           and .[1].value.usePermissiveCors == false
           and .[1].value.useXForwarded == false

@@ -241,7 +241,7 @@ verify_live_dav_endpoints() {
   printf 'CalDAV, CardDAV, and WebDAV HTTPS endpoints: verified\n'
 }
 
-verify_implicit_tls() {
+verify_tls_policy() {
   local authority host port
   authority=${STALWART_URL#https://}
   authority=${authority%%/*}
@@ -251,18 +251,41 @@ verify_implicit_tls() {
     return 1
   fi
 
-  for port in 465 993; do
+  for port in 443 465 993; do
     if ! timeout 20 openssl s_client \
       -connect "${host}:${port}" \
       -servername "${host}" \
+      -tls1_3 \
       -verify_hostname "${host}" \
       -verify_return_error \
       -brief </dev/null >/dev/null 2>&1; then
-      printf 'Implicit TLS verification failed for %s:%s\n' "${host}" "${port}" >&2
+      printf 'TLS 1.3 verification failed for client endpoint %s:%s\n' "${host}" "${port}" >&2
+      return 1
+    fi
+
+    if timeout 20 openssl s_client \
+      -connect "${host}:${port}" \
+      -servername "${host}" \
+      -tls1_2 \
+      -brief </dev/null >/dev/null 2>&1; then
+      printf 'Client endpoint %s:%s unexpectedly accepted TLS 1.2\n' "${host}" "${port}" >&2
       return 1
     fi
   done
-  printf 'Implicit TLS on submission and IMAPS: verified\n'
+
+  if ! timeout 20 openssl s_client \
+    -starttls smtp \
+    -connect "${host}:25" \
+    -servername "${host}" \
+    -tls1_2 \
+    -verify_hostname "${host}" \
+    -verify_return_error \
+    -brief </dev/null >/dev/null 2>&1; then
+    printf 'SMTP federation endpoint %s:25 did not accept TLS 1.2 STARTTLS\n' "${host}" >&2
+    return 1
+  fi
+
+  printf 'Client TLS 1.3 floor and SMTP federation TLS 1.2 compatibility: verified\n'
 }
 
 audit() {
@@ -279,7 +302,7 @@ audit() {
   printf 'Stalwart declarative hardening: in sync\n'
   verify_live_http_headers
   verify_live_dav_endpoints
-  verify_implicit_tls
+  verify_tls_policy
 }
 
 if [[ ${mode} == audit ]]; then
@@ -292,7 +315,7 @@ if configuration_matches; then
   printf 'Stalwart declarative hardening: already in sync\n'
   verify_live_http_headers
   verify_live_dav_endpoints
-  verify_implicit_tls
+  verify_tls_policy
   exit
 fi
 

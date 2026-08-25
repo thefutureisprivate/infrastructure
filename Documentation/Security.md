@@ -124,6 +124,12 @@ SMTP port 25 remains non-implicit for Internet federation, but AUTH is disabled
 on that port; SMTP client authentication of every kind is offered only when
 TLS is already active on a non-federation listener.
 
+The authenticated client listeners on ports 443, 465, and 993 disable TLS 1.2
+and therefore require TLS 1.3. The port 25 federation listener deliberately
+keeps both TLS 1.2 and TLS 1.3 available for inbound server-to-server STARTTLS;
+outbound SMTP negotiation is unchanged. Stalwart's TLS library does not offer
+TLS 1.0 or TLS 1.1 on any listener.
+
 The HTTP singleton enables HSTS, keeps permissive CORS and untrusted forwarded
 addresses disabled, reduces anonymous and authenticated rate limits, and sets a
 comprehensive browser security-header baseline. CSP denies resources by
@@ -142,7 +148,8 @@ handling user credentials.
 The hardening client reads and compares the managed live fields before
 applying, so a matching second run performs no server mutation. Its audit then
 checks the configuration through Stalwart's API, the headers and DAV routes on
-live HTTPS responses, and certificate validation on ports 465 and 993.
+live HTTPS responses, positive TLS 1.3 and negative TLS 1.2 handshakes on every
+client endpoint, and a positive TLS 1.2 STARTTLS handshake on port 25.
 
 ## Secret Boundary
 

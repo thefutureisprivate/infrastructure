@@ -98,10 +98,11 @@ Security controls are applied at every layer:
   filesystems, private networking, PostgreSQL no-new-privileges, and
   systemd-managed restart ordering.
 - **Stalwart:** client protocols use implicit TLS only; SMTP port 25 remains a
-  non-authenticated federation listener with STARTTLS. CalDAV, CardDAV, and
-  WebDAV share the hardened HTTPS listener and have explicit resource bounds.
-  A declarative plan removes POP3, ManageSieve, cleartext HTTP, and STARTTLS
-  client listeners.
+  non-authenticated federation listener with STARTTLS. HTTPS, submission, and
+  IMAPS require TLS 1.3; SMTP federation retains TLS 1.2 compatibility.
+  CalDAV, CardDAV, and WebDAV share the hardened HTTPS listener and have
+  explicit resource bounds. A declarative plan removes POP3, ManageSieve,
+  cleartext HTTP, and STARTTLS client listeners.
 - **Secrets:** separate encrypted provider and mail scopes; decrypted values
   enter only the child process that needs them. Ansible creates Podman secrets
   over standard input and renders no credentials into Quadlets.

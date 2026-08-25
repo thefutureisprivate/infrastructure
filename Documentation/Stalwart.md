@@ -15,11 +15,13 @@ Use these values during the Stalwart setup flow:
 The public services are SMTP federation on 25,
 HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin on 443, implicit-TLS submission on 465,
 and IMAPS on 993. Authenticated clients must use 443, 465, or 993, where TLS
-begins with the first byte. Port 25 cannot use
+1.3 begins with the first byte. Port 25 cannot use
 implicit TLS because Internet SMTP delivery begins in cleartext and upgrades
-with STARTTLS; Stalwart authentication is disabled there, so it is not a
-client-submission exception. POP3, ManageSieve, cleartext HTTP, ports 143 and
-587, and any other listener are deliberately absent.
+with STARTTLS. It continues to offer TLS 1.2 and TLS 1.3 for interoperability
+with other mail servers; Stalwart authentication is disabled there, so it is
+not a client-submission exception. POP3, ManageSieve, cleartext HTTP, ports 143
+and 587, and any other listener are deliberately absent. Outbound SMTP TLS
+policy is unchanged and continues to negotiate with receiving mail servers.
 
 ## Secure Bootstrap
 
@@ -103,9 +105,10 @@ make stalwart-audit
 The apply command first reads the live settings. It performs no mutation when
 they already match, validates the plan before changing drifted settings, and
 audits again afterwards. The audit also checks the live HTTPS headers and
-CalDAV, CardDAV, and WebDAV routes, then performs chain- and hostname-verified
-implicit-TLS handshakes on ports 465 and 993. It also reads back the one
-permitted Application and fails on Web UI resource drift.
+CalDAV, CardDAV, and WebDAV routes. It requires successful TLS 1.3 handshakes
+and rejected TLS 1.2 handshakes on ports 443, 465, and 993, then verifies that
+SMTP federation on port 25 still accepts TLS 1.2 through STARTTLS. It also reads
+back the one permitted Application and fails on Web UI resource drift.
 
 The HTTP policy enables Stalwart's one-year HSTS response, disables permissive
 CORS and forwarded-IP trust, applies authenticated and anonymous request-rate
