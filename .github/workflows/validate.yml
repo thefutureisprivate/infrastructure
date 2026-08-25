@@ -74,27 +74,7 @@ jobs:
         run: "Tests/fcos-rescue-installer.sh"
 
       - name: "Validate Stalwart hardening plan"
-        run: >-
-          jq -e -s
-          'length == 6
-          and map(."@type") == ["reconcile", "update", "update", "update", "update", "reconcile"]
-          and map(.object) == ["NetworkListener", "Http", "WebDav", "MtaStageAuth", "MtaStageMail", "Application"]
-          and (.[0].value | keys | sort) == ["https", "imaps", "smtp", "submissions"]
-          and .[0].value.smtp.tlsDisableProtocols == {}
-          and .[0].value.submissions.tlsDisableProtocols == {"tls12": true}
-          and .[0].value.imaps.tlsDisableProtocols == {"tls12": true}
-          and .[0].value.https.tlsDisableProtocols == {"tls12": true}
-          and .[1].value.enableHsts == true
-          and .[1].value.usePermissiveCors == false
-          and .[1].value.useXForwarded == false
-          and (.[1].value.responseHeaders["Content-Security-Policy"] | length > 0)
-          and .[2].value.enableAssistedDiscovery == false
-          and .[2].value.requestMaxSize == 26214400
-          and .[2].value.maxResults == 2000
-          and .[4].value.isSenderAllowed.else == "is_tls && (!is_empty(authenticated_as) || !key_exists(\u0027spam-block\u0027, sender_domain))"
-          and .[5].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip"
-          and (.[5].value.webui.urlPrefix | keys | sort) == ["/account", "/admin"]'
-          Stalwart/hardening.ndjson >/dev/null
+        run: "bash Scripts/check-stalwart-hardening-plan.sh"
 
       - name: "Check YAML"
         run: "yamllint -c .yamllint.yml .github Ansible Butane SOPS Tools Tests/ansible/idempotence.yml"

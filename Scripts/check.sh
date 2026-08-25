@@ -15,46 +15,7 @@ printf 'Shell syntax: OK\n'
 "${repo_root}/Tests/fcos-rescue-installer.sh"
 "${repo_root}/Tests/stalwart-bootstrap.sh"
 
-jq -e -s '
-  length == 7 and
-  (map(."@type") == ["reconcile", "upsert", "update", "update", "update", "update", "reconcile"]) and
-  (map(.object) == ["NetworkListener", "MtaInboundThrottle", "Http", "WebDav", "MtaStageAuth", "MtaStageMail", "Application"]) and
-  (.[0].value | keys | sort == ["https", "imaps", "smtp", "submissions"]) and
-  (.[0].value.smtp.tlsImplicit == false) and
-  (.[0].value.submissions.tlsImplicit == true) and
-  (.[0].value.imaps.tlsImplicit == true) and
-  (.[0].value.https.tlsImplicit == true) and
-  (.[0].value.smtp.tlsDisableProtocols == {}) and
-  (.[0].value.submissions.tlsDisableProtocols == {"tls12": true}) and
-  (.[0].value.imaps.tlsDisableProtocols == {"tls12": true}) and
-  (.[0].value.https.tlsDisableProtocols == {"tls12": true}) and
-  (.[1].matchOn == ["description"]) and
-  (.[1].value["sender-ip"] == {
-    "enable": true,
-    "description": "Sender IP throttle",
-    "key": {"remoteIp": true},
-    "match": {"else": "true"},
-    "rate": {"count": 25, "period": 1000}
-  }) and
-  (.[2].value.enableHsts == true) and
-  (.[2].value.usePermissiveCors == false) and
-  (.[2].value.useXForwarded == false) and
-  (.[2].value.responseHeaders["Content-Security-Policy"] | contains("default-src"))
-  and (.[2].value.responseHeaders["Content-Security-Policy"] | contains("script-src \u0027self\u0027 \u0027sha256-DN+qOOjtGVsV8lkg72s4vC1jiBzlp3i4PLyWBwwmEBE=\u0027"))
-  and (.[2].value.responseHeaders["Content-Security-Policy"] | contains("script-src \u0027unsafe-inline\u0027") | not)
-  and (.[3].value == {
-    "enableAssistedDiscovery": false,
-    "maxLockTimeout": 3600000,
-    "maxLocks": 10,
-    "deadPropertyMaxSize": 1024,
-    "livePropertyMaxSize": 250,
-    "requestMaxSize": 26214400,
-    "maxResults": 2000
-  })
-  and (.[5].value.isSenderAllowed.else == "is_tls && (!is_empty(authenticated_as) || !key_exists(\u0027spam-block\u0027, sender_domain))")
-  and (.[6].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip")
-  and (.[6].value.webui.urlPrefix | keys | sort == ["/account", "/admin"])
-' "${repo_root}/Stalwart/hardening.ndjson" >/dev/null
+bash "${repo_root}/Scripts/check-stalwart-hardening-plan.sh"
 jq -e -s '
   length == 1
   and .[0]."@type" == "update"
