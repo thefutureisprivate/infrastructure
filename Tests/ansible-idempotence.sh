@@ -47,6 +47,15 @@ run_playbook() {
       "${repo_root}/Tests/ansible/idempotence.yml"
 }
 
+compare_privileged_file_with_stdin() {
+  local path=$1
+  if [[ ${become} == true ]]; then
+    sudo -n cmp -s - "${path}"
+  else
+    cmp -s - "${path}"
+  fi
+}
+
 if ! first_run=$(run_playbook); then
   printf '%s\n' "${first_run}"
   exit 1
@@ -59,9 +68,8 @@ fi
 
 mutations_after_first=$(wc -l <"${test_root}/state/mutations.log")
 expected_secret=$'correct-horse-battery-staple-idempotence\nshell metacharacters stay data: $() ; '\'' " \\'
-if ! cmp -s \
-  <(printf '%s' "${expected_secret}") \
-  "${test_root}/state/secrets/test-secret"; then
+if ! printf '%s' "${expected_secret}" | \
+  compare_privileged_file_with_stdin "${test_root}/state/secrets/test-secret"; then
   printf '%s\n' "Podman did not receive the exact multiline secret over standard input." >&2
   exit 1
 fi
