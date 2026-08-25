@@ -194,6 +194,14 @@ IPv6 endpoints with the `one.one.one.one` TLS identity. `DNSOverTLS=yes` and
 fallback list is explicitly empty, while NetworkManager is prevented from
 injecting DHCP-provided resolvers into `systemd-resolved`.
 
+Ignition replaces `/etc/resolv.conf` with a link to
+`/run/systemd/resolve/stub-resolv.conf`, which sends libc resolver traffic to
+the full `127.0.0.53` stub where DNSSEC is validated locally. It deliberately
+does not use systemd-resolved's `127.0.0.54` proxy stub, because that endpoint
+passes DNS messages through without local DNSSEC validation. The rendered
+Ignition regression check enforces this link, strict DNSSEC and DNS-over-TLS,
+the empty fallback list, the root route, and the NetworkManager exclusion.
+
 This protects DNS traffic between the VPS and the resolver from passive
 observation or modification. It does not hide queries from Cloudflare, and a
 Cloudflare or TCP 853 outage makes DNS resolution unavailable rather than

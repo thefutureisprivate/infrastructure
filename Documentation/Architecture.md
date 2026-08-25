@@ -81,11 +81,12 @@ flowchart LR
 3. OpenTofu sends the Ignition JSON directly as `hcloud_server.user_data`.
    There is no cloud-init translation or second bootstrap path.
 4. On first boot, Ignition creates the operator account, applies the same host
-   policy to every node, configures strict Cloudflare DNS-over-TLS, and enables
-   `gvisor-install.service`. That generic unit downloads one immutable gVisor
-   release bundle, verifies its SHA-512 digest, and installs `runsc` with its
-   required sidecars. It has no mail-unit ordering dependency; Quadlets declare
-   their own requirement on it.
+   policy to every node, configures strict Cloudflare DNS-over-TLS, links every
+   host resolver client to systemd-resolved's locally validating stub, and
+   enables `gvisor-install.service`. That generic unit downloads one immutable
+   gVisor release bundle, verifies its SHA-512 digest, and installs `runsc` with
+   its required sidecars. It has no mail-unit ordering dependency; Quadlets
+   declare their own requirement on it.
 5. OpenTofu reads the existing deSEC zone, reconciles per-node host records,
    aligns each Hetzner PTR record with its declared hostname, and mints
    Stalwart's restricted child token for the selected mail node.

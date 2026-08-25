@@ -49,6 +49,7 @@ printf 'Stalwart hardening plan: OK\n'
 
 SSH_PUBLIC_KEY_FILE="${repo_root}/Tests/fixtures/ssh-authorized-key.pub" \
   "${repo_root}/Scripts/render-ignition.sh" "${repo_root}/build/fcos.ign"
+python3 "${repo_root}/Tests/verify-resolved-ignition.py" "${repo_root}/build/fcos.ign"
 printf 'Butane: OK\n'
 
 if command -v "${tofu_bin}" >/dev/null 2>&1; then

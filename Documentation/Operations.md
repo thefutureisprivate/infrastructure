@@ -174,8 +174,10 @@ systemctl is-enabled sshd-vsock.socket sshd-unix-local.socket
 sudo sysctl kernel.panic kernel.panic_on_oops kernel.yama.ptrace_scope vm.mmap_rnd_bits
 chronyc -N authdata
 chronyc sources -v
+readlink -f /etc/resolv.conf
 resolvectl status
 resolvectl query cloudflare.com
+journalctl -b -u systemd-resolved.service
 journalctl --disk-usage
 systemctl status zincati.service
 ```
@@ -183,8 +185,19 @@ systemctl status zincati.service
 At least three authenticated chrony sources must remain usable. The two SSH
 socket units should report `masked`; `resolvectl status` must show only the four
 Cloudflare endpoints with DNS-over-TLS and DNSSEC enabled; and Zincati must
-remain active. On the mail-role node, additionally verify both containers still
-use `runsc`:
+remain active. `readlink` must return
+`/run/systemd/resolve/stub-resolv.conf`, and the successful query must report
+that its answer is authenticated. A query for a deliberately broken DNSSEC
+test domain must fail rather than return an address:
+
+```bash
+if resolvectl query dnssec-failed.org; then
+  printf 'DNSSEC validation unexpectedly accepted a bogus answer\n' >&2
+  exit 1
+fi
+```
+
+On the mail-role node, additionally verify both containers still use `runsc`:
 
 ```bash
 sudo podman inspect --format '{{.OCIRuntime}}' mail-postgres mail-stalwart

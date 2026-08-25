@@ -94,6 +94,11 @@ storage:
         name: root
       group:
         name: root
+  links:
+    - path: /etc/resolv.conf
+      target: /run/systemd/resolve/stub-resolv.conf
+      hard: false
+      overwrite: true
   files:
     - path: /etc/ssh/sshd_config.d/20-fcos-hardening.conf
       mode: 0644
@@ -165,6 +170,7 @@ storage:
           Domains=~.
           DNSSEC=yes
           DNSOverTLS=yes
+          DNSStubListener=yes
           LLMNR=no
           MulticastDNS=no
     - path: /etc/sysctl.d/60-fcos-hardening.conf

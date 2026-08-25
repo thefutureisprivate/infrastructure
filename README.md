@@ -67,8 +67,9 @@ deployment. The full lifecycle and trust boundaries are documented in
 - Deploys digest-pinned Stalwart and PostgreSQL images as rootful Quadlets.
 - Runs both containers with `runsc` and refuses to start them before the
   checksum-pinned gVisor bundle is installed.
-- Sends host DNS exclusively through authenticated Cloudflare DNS-over-TLS,
-  with DNSSEC validation and no plaintext fallback.
+- Sends host DNS exclusively through systemd-resolved's full local validating
+  stub and authenticated Cloudflare DNS-over-TLS, with strict DNSSEC and no
+  plaintext or non-validating fallback.
 - Keeps PostgreSQL off the host network and publishes only SMTP,
   HTTPS/JMAP/CalDAV/CardDAV/WebDAV, implicit-TLS submission, and IMAPS. The temporary bootstrap listener is
   opt-in and bound to loopback only.

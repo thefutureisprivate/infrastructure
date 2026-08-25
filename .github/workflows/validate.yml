@@ -35,6 +35,9 @@ jobs:
           SSH_PUBLIC_KEY_FILE: "Tests/fixtures/ssh-authorized-key.pub"
         run: "./Scripts/render-ignition.sh build/fcos.ign"
 
+      - name: "Verify local DNSSEC resolver path"
+        run: "python Tests/verify-resolved-ignition.py build/fcos.ign"
+
       - name: "Check OpenTofu formatting"
         run: "tofu -chdir=OpenTofu fmt -check -recursive"
 
