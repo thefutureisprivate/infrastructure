@@ -1,0 +1,9 @@
+---
+- name: "Reconcile changed Hetzner IPv6 configuration"
+  ansible.builtin.raw: |
+    set -eu
+    systemctl_bin={{ hetzner_ipv6_systemctl_binary | quote }}
+    "$systemctl_bin" daemon-reload
+    "$systemctl_bin" enable hetzner-ipv6.service >/dev/null
+    "$systemctl_bin" restart hetzner-ipv6.service
+  changed_when: true

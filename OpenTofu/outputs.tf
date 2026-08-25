@@ -32,30 +32,18 @@ output "rescue_ssh_key_id" {
 
 output "ansible_inventory" {
   description = "YAML inventory consumed by Scripts/render-inventory.sh."
-  value = yamlencode({
-    all = {
-      children = {
-        fcos = {
-          hosts = {
-            for key, server in hcloud_server.fcos : server.name => {
-              ansible_host = var.nodes[key].ipv4 ? server.ipv4_address : server.ipv6_address
-              node_key     = key
-            }
-          }
-          children = {
-            mail = {
-              hosts = {
-                for key, server in hcloud_server.fcos : server.name => {
-                  mail_hostname = local.mail_fqdn
-                } if key == var.mail_server_node_key
-              }
-            }
-          }
-        }
-      }
-      vars = {
-        ansible_user = "thefutureisprivate"
-      }
+  value = templatefile("${path.module}/templates/ansible-inventory.yml.tftpl", {
+    mail_node = {
+      key             = var.mail_server_node_key
+      name            = hcloud_server.fcos[var.mail_server_node_key].name
+      connection_host = local.mail_fqdn
+    }
+    mail_hostname = local.mail_fqdn
+    non_mail_nodes = {
+      for key, server in hcloud_server.fcos : key => {
+        name            = server.name
+        connection_host = local.desec_subnames[key] == "@" ? local.desec_zone_name : "${local.desec_subnames[key]}.${local.desec_zone_name}"
+      } if key != var.mail_server_node_key
     }
   })
 }

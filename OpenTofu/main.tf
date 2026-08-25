@@ -6,6 +6,27 @@ locals {
   }, var.resource_labels)
 
   operator_ssh_public_key_path = var.ssh_public_key_file == null ? abspath("${path.root}/../Butane/files/operator.pub") : abspath(var.ssh_public_key_file)
+
+  primary_ipv4_nodes = {
+    for key, node in var.nodes : key => node
+    if node.ipv4
+  }
+  primary_ipv6_nodes = {
+    for key, node in var.nodes : key => node
+    if node.ipv6
+  }
+  primary_ipv4_imports = {
+    for key, addresses in var.primary_ip_import_ids : key => addresses.ipv4
+    if addresses.ipv4 != null
+  }
+  primary_ipv6_imports = {
+    for key, addresses in var.primary_ip_import_ids : key => addresses.ipv6
+    if addresses.ipv6 != null
+  }
+  primary_ip_import_id_list = concat(
+    values(local.primary_ipv4_imports),
+    values(local.primary_ipv6_imports),
+  )
 }
 
 resource "hcloud_ssh_key" "operator" {
@@ -59,6 +80,50 @@ resource "hcloud_placement_group" "fcos" {
   labels = local.common_labels
 }
 
+resource "hcloud_primary_ip" "ipv4" {
+  for_each = local.primary_ipv4_nodes
+
+  name              = "${var.name_prefix}-${each.key}-ipv4"
+  type              = "ipv4"
+  location          = coalesce(each.value.location, var.default_location)
+  auto_delete       = false
+  delete_protection = true
+  labels            = merge(local.common_labels, { "address-family" = "ipv4" })
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "hcloud_primary_ip" "ipv6" {
+  for_each = local.primary_ipv6_nodes
+
+  name              = "${var.name_prefix}-${each.key}-ipv6"
+  type              = "ipv6"
+  location          = coalesce(each.value.location, var.default_location)
+  auto_delete       = false
+  delete_protection = true
+  labels            = merge(local.common_labels, { "address-family" = "ipv6" })
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+import {
+  for_each = local.primary_ipv4_imports
+
+  to = hcloud_primary_ip.ipv4[each.key]
+  id = tostring(each.value)
+}
+
+import {
+  for_each = local.primary_ipv6_imports
+
+  to = hcloud_primary_ip.ipv6[each.key]
+  id = tostring(each.value)
+}
+
 resource "hcloud_server" "fcos" {
   for_each = var.nodes
 
@@ -77,6 +142,12 @@ resource "hcloud_server" "fcos" {
   public_net {
     ipv4_enabled = each.value.ipv4
     ipv6_enabled = each.value.ipv6
+    # The hcloud provider cannot safely convert an already attached automatic
+    # address to its identical explicit ID: it first unassigns and attempts to
+    # delete that address. Imported nodes therefore retain their existing
+    # attachment marker; newly created nodes attach protected resources here.
+    ipv4 = each.value.ipv4 && try(var.primary_ip_import_ids[each.key].ipv4, null) == null ? hcloud_primary_ip.ipv4[each.key].id : null
+    ipv6 = each.value.ipv6 && try(var.primary_ip_import_ids[each.key].ipv6, null) == null ? hcloud_primary_ip.ipv6[each.key].id : null
   }
 
   backups                  = var.enable_backups
@@ -105,6 +176,30 @@ check "mail_server_node" {
   assert {
     condition     = try(var.nodes[var.mail_server_node_key].ipv4, false)
     error_message = "The mail-server node must have IPv4 enabled for broad SMTP interoperability."
+  }
+}
+
+check "primary_ip_imports" {
+  assert {
+    condition = alltrue([
+      for key in keys(var.primary_ip_import_ids) : contains(keys(var.nodes), key)
+    ])
+    error_message = "Every primary_ip_import_ids key must refer to a key in nodes."
+  }
+
+  assert {
+    condition = alltrue([
+      for key, addresses in var.primary_ip_import_ids :
+      (addresses.ipv4 == null || var.nodes[key].ipv4) &&
+      (addresses.ipv6 == null || var.nodes[key].ipv6)
+      if contains(keys(var.nodes), key)
+    ])
+    error_message = "Imported Primary IP IDs must match address families enabled on their node."
+  }
+
+  assert {
+    condition     = length(distinct(local.primary_ip_import_id_list)) == length(local.primary_ip_import_id_list)
+    error_message = "Each imported Hetzner Primary IP ID must be unique."
   }
 }
 

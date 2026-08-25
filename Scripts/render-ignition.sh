@@ -9,6 +9,16 @@ key_file=${SSH_PUBLIC_KEY_FILE:-"${repo_root}/Butane/files/operator.pub"}
 runtime=${BUTANE_RUNTIME:-auto}
 butane_image=$("${repo_root}/Scripts/tool-image.sh" butane)
 
+container_engine() {
+  local engine=$1
+  shift
+  if [[ ${engine} == podman && -n ${CONTAINER_ID:-} ]] && command -v distrobox-host-exec >/dev/null 2>&1; then
+    distrobox-host-exec podman "$@"
+  else
+    "${engine}" "$@"
+  fi
+}
+
 if [[ ! -r "${key_file}" ]]; then
   printf 'SSH public key is not readable: %s\n' "${key_file}" >&2
   exit 2
@@ -27,14 +37,32 @@ trap 'rm -rf -- "${stage_dir}"; rm -f -- "${temporary_output}"' EXIT HUP INT TER
 install -m 0644 -- "${config_file}" "${stage_dir}/fcos.bu"
 install -m 0644 -- "${key_file}" "${stage_dir}/ssh-authorized-key.pub"
 install -D -m 0755 -- "${repo_root}/Butane/files/install-gvisor.sh" "${stage_dir}/files/install-gvisor.sh"
+install -D -m 0755 -- "${repo_root}/Butane/files/configure-hetzner-ipv6.sh" \
+  "${stage_dir}/files/configure-hetzner-ipv6.sh"
+
+verify_container_engine() {
+  local engine=$1
+  if container_engine "${engine}" info >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ ${engine} == podman && -n ${CONTAINER_ID:-} ]]; then
+    printf 'The host Podman engine is unreachable through distrobox-host-exec.\n' >&2
+    printf 'Run on the host, outside Distrobox: podman info\n' >&2
+  else
+    printf '%s is installed but its container service is unreachable.\n' "${engine}" >&2
+  fi
+  return 1
+}
 
 run_container() {
   local engine=$1
   local mount_suffix=ro
+  verify_container_engine "${engine}"
   if [[ "${engine}" == "podman" ]]; then
     mount_suffix=ro,Z
   fi
-  "${engine}" run --rm --interactive \
+  container_engine "${engine}" run --rm --interactive \
     --volume "${stage_dir}:/work:${mount_suffix}" \
     "${butane_image}" \
     --strict --pretty --files-dir /work /work/fcos.bu >"${temporary_output}"

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ ${1:-} == info ]]; then
+  exit 0
+fi
+
 mount_spec=''
 while (($# > 0)); do
   if [[ $1 == --volume ]]; then

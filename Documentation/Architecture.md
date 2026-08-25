@@ -65,12 +65,12 @@ flowchart LR
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | `Butane/` | Mail-independent first-boot user, SSH policy, kernel and sysctl hardening, masked services, gVisor installation | Cloud resources, host roles, or application configuration |
-| `OpenTofu/` | Hetzner servers, shared base firewall, role firewall, placement, backups, protection, per-node reverse DNS, selected shared deSEC RRsets, A/AAAA records, and the exact-name Stalwart token | Zone lifecycle and authorized mail-domain record contents managed natively by Stalwart |
+| `OpenTofu/` | Hetzner servers, shared base firewall, role firewall, placement, backups, protection, per-node reverse DNS, selected shared deSEC RRsets, A/AAAA records, CAA, DMARC, TLS-RPT, and the exact-name Stalwart token | Zone lifecycle and authorized mail-domain record contents managed natively by Stalwart |
 | `Scripts/install-fcos*.sh` | Guarded Rescue activation, hash-checked installer transport, direct FCOS disk installation, and installation-state transition | Cloud resource declaration, application secrets, or running-host reconciliation |
 | `SOPS/` | Encrypted provider and application credentials, age recipient policy, secret handoff helpers | Infrastructure state or persistent application data |
 | `Ansible/` | Group-scoped Podman secrets, Quadlet source files, support files, networks, volumes, and service reconciliation | Host boot configuration or cloud lifecycle |
-| `Stalwart/` | Exact TLS listeners, verified local Web UI Application, HTTP security headers and CSP, HTTP and DAV resource limits, and SMTP authentication policy | Domains, accounts, certificates, DNS publication, or mail routing policy |
-| Stalwart | Mail service configuration and explicitly authorized DNS owner/type pairs, including its account-bound CAA RRset | Zone lifecycle, HTTPS records, unrelated names, address records, reverse DNS, TLSA, or token management |
+| `Stalwart/` | Declarative server identity, Domain, deSEC and staged ACME bootstrap, exact TLS listeners, verified local Web UI Application, HTTP security headers and CSP, HTTP and DAV resource limits, and SMTP authentication policy | Accounts, mailbox data, or unrelated DNS records |
+| Stalwart | Mail service configuration and explicitly authorized DNS owner/type pairs, including inbound SMTP TLSA | Zone lifecycle, CAA, DMARC, TLS-RPT, HTTPS records, unrelated names, address records, reverse DNS, or token management |
 | PostgreSQL | Stalwart relational data | Host networking or external database access |
 
 ## Provisioning Lifecycle
@@ -85,8 +85,9 @@ flowchart LR
    Hetzner Rescue, transfers hash-checked installation inputs, and invokes the
    bundled loader. The remote guard requires an expected unmounted block
    device. CoreOS Installer downloads and verifies FCOS, writes it directly to
-   the server disk, embeds Ignition, and sets the Hetzner platform ID. No
-   temporary server, snapshot, or cloud-init path exists.
+   the server disk, embeds Ignition, sets the Hetzner platform ID, and enables
+   initramfs DHCP so Afterburn can reach Hetzner's link-local metadata service.
+   No temporary server, snapshot, or cloud-init path exists.
 4. The controller power-cycles the server, verifies an FCOS ostree boot over
    SSH, and changes only the ignored installation marker to `installed`.
    Repeated runs skip it; a destructive reinstall requires an explicit
@@ -107,16 +108,31 @@ flowchart LR
    the encrypted mail secret scope without a plaintext temporary file.
 8. `Scripts/render-inventory.sh` converts the OpenTofu inventory output into an
    ignored, owner-readable Ansible inventory. Every VPS belongs to `fcos`; only
-   the selected node belongs to `mail`.
+   the selected node belongs to `mail`. Each `ansible_host` is the
+   deSEC-managed node FQDN rather than one address, allowing OpenSSH to use its
+   A and AAAA records without changing inventory or host-key identity.
 9. The current Ansible play targets `mail` only. It verifies the pinned Web UI
    checksum, mounts that bundle read-only, sends Podman secret bytes through
    SSH standard input, reconciles Quadlet sources atomically, and restarts only
-   changed services. FCOS needs no Python interpreter.
-10. After certificate bootstrap, the pinned Stalwart CLI reconciles the
-   committed hardening plan through a least-privilege SOPS-backed API key. It
-   skips the mutation when the managed live fields already match and audits
-   configuration, HTTPS headers, DAV routes, the TLS 1.3 client floor, and SMTP
-   federation TLS 1.2 compatibility afterwards.
+   changed services. Each Stalwart container receives the stable, unique
+   Ansible inventory name as `STALWART_HOSTNAME`, preventing container IDs from
+   becoming new cluster-node leases after restarts. FCOS needs no Python
+   interpreter.
+10. `make stalwart-bootstrap` creates a fresh one-run recovery credential,
+    carries it through transient local and server-side Podman secrets, and
+    temporarily enables the loopback listener and SSH tunnel. It applies the
+    committed identity, deSEC, Domain, DKIM, local Web UI, and
+    production ACME declaration and the first-rollout-only staging declaration;
+    discovers the exact DKIM selectors and active ACME account URI; and expands
+    only the required child-token
+    policies. After public trust, apex/mail CAA, and a regular Web UI
+    administrator have been verified, the exit trap restores the production
+    Quadlet before deleting the recovery secret.
+11. The pinned Stalwart CLI reconciles the committed hardening plan through a
+    least-privilege SOPS-backed API key. It skips the mutation when the managed
+    live fields already match and audits configuration, HTTPS headers, DAV
+    routes, the TLS 1.3 client floor, and SMTP federation TLS 1.2 compatibility
+    afterwards.
 
 Ignition is a first-boot mechanism. Changes under `Butane/` do not reconcile an
 already installed host; rebuild the server when those files change.
@@ -148,18 +164,21 @@ OpenTofu creates a child token with:
 
 - a default-deny policy;
 - write access only to the exact reviewed mail owner-name/type pairs;
-- DKIM access only for selectors declared in `stalwart_dkim_selectors`;
-- no wildcard, unrelated-name, A/AAAA, or TLSA permission; CAA access is
-  limited to the mail-domain apex;
+- DKIM access only for exact selectors supplied by the ignored generated
+  `stalwart_dkim_selectors` override;
+- no wildcard, unrelated-name, or A/AAAA permission; TLSA access is limited to
+  the five exact public TLS listener names, and there is no CAA, DMARC, or
+  TLS-RPT access;
 - authentication restricted to the mail server's public IPv4 and IPv6
   addresses;
 - no domain creation, domain deletion, or token-management permission.
 
-OpenTofu keeps ownership of A, AAAA, Hetzner PTR, and selected non-mail records
-so Stalwart cannot redirect the host identity or expand its own authority.
-Stalwart owns CAA because only it knows the ACME account URI after registering
-the production account. The exact ownership split is recorded in
-[DNS Ownership](DNS.md).
+OpenTofu keeps ownership of A, AAAA, Hetzner PTR, selected non-mail records,
+both CAA RRsets, DMARC, and TLS-RPT so Stalwart cannot redirect the host
+identity, combine report destinations, or expand its own authority. The
+bootstrap reads Stalwart's registered account URI and feeds
+that public value into the ignored generated OpenTofu input. The exact
+ownership split is recorded in [DNS Ownership](DNS.md).
 
 ## State and Data
 

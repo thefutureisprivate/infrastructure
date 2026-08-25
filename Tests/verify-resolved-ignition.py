@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that rendered Ignition forces DNS through the validating stub."""
+"""Verify security-critical properties of the rendered FCOS Ignition."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from urllib.parse import unquote_to_bytes
 
 
 def fail(message: str) -> None:
-    raise SystemExit(f"resolved Ignition policy: {message}")
+    raise SystemExit(f"FCOS Ignition policy: {message}")
 
 
 def embedded_file(
@@ -136,7 +136,53 @@ def main() -> None:
     if len(resolved_units) != 1 or resolved_units[0].get("enabled") is not True:
         fail("systemd-resolved.service is not explicitly enabled")
 
-    print("Local DNSSEC validation path: OK")
+    sudoers_item, sudoers_text = embedded_file(
+        config, "/etc/sudoers.d/60-thefutureisprivate"
+    )
+    if sudoers_item.get("mode") != 0o440:
+        fail("operator sudoers drop-in does not use mode 0440")
+    for owner_type in ("user", "group"):
+        owner = sudoers_item.get(owner_type)
+        if not isinstance(owner, dict) or owner.get("name") != "root":
+            fail(f"operator sudoers drop-in {owner_type} is not root")
+    if sudoers_text != "thefutureisprivate ALL=(root) NOPASSWD: ALL\n":
+        fail("operator sudoers drop-in has unexpected contents")
+
+    ipv6_script_item, ipv6_script_text = embedded_file(
+        config, "/usr/local/sbin/configure-hetzner-ipv6"
+    )
+    if ipv6_script_item.get("mode") != 0o755:
+        fail("Hetzner IPv6 configurator does not use mode 0755")
+    for required_fragment in (
+        "http://169.254.169.254/hetzner/v1/metadata/network-config",
+        "/sys/class/net/*/address",
+        "ipv6.method manual",
+        "ipv6.ignore-auto-dns yes",
+        'nmcli device reapply "${interface}"',
+    ):
+        if required_fragment not in ipv6_script_text:
+            fail(f"Hetzner IPv6 configurator is missing {required_fragment!r}")
+
+    ipv6_units = [
+        item
+        for item in units
+        if isinstance(item, dict) and item.get("name") == "hetzner-ipv6.service"
+    ]
+    if len(ipv6_units) != 1 or ipv6_units[0].get("enabled") is not True:
+        fail("hetzner-ipv6.service is not explicitly enabled")
+    ipv6_unit_contents = ipv6_units[0].get("contents")
+    if not isinstance(ipv6_unit_contents, str):
+        fail("hetzner-ipv6.service has no unit contents")
+    for required_fragment in (
+        "ExecStart=/usr/local/sbin/configure-hetzner-ipv6",
+        "NoNewPrivileges=yes",
+        "ProtectSystem=strict",
+        "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK",
+    ):
+        if required_fragment not in ipv6_unit_contents:
+            fail(f"hetzner-ipv6.service is missing {required_fragment!r}")
+
+    print("FCOS Ignition policy: OK")
 
 
 if __name__ == "__main__":

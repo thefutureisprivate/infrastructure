@@ -82,6 +82,25 @@ variable "mail_server_node_key" {
   }
 }
 
+variable "primary_ip_import_ids" {
+  description = "Existing Hetzner Primary IP resource IDs to adopt without replacing their addresses. Leave empty for newly created nodes."
+  type = map(object({
+    ipv4 = optional(number)
+    ipv6 = optional(number)
+  }))
+  default = {}
+
+  validation {
+    condition = alltrue(flatten([
+      for addresses in values(var.primary_ip_import_ids) : [
+        addresses.ipv4 == null || addresses.ipv4 > 0,
+        addresses.ipv6 == null || addresses.ipv6 > 0,
+      ]
+    ]))
+    error_message = "Imported Primary IP IDs must be positive Hetzner resource IDs."
+  }
+}
+
 variable "mail_ingress_rules" {
   description = "Inbound application rules attached only to the selected mail-server node."
   type = list(object({
@@ -147,7 +166,7 @@ variable "desec_domain" {
 }
 
 variable "stalwart_dkim_selectors" {
-  description = "Exact active Stalwart DKIM selector labels authorized in deSEC. Leave empty only for initial bootstrap, then authorize selectors before automatic publication."
+  description = "Exact active or retiring Stalwart DKIM selector labels authorized in deSEC. The automated bootstrap supplies these through an ignored generated variable file."
   type        = set(string)
   default     = []
 
@@ -160,14 +179,29 @@ variable "stalwart_dkim_selectors" {
   }
 }
 
+variable "stalwart_acme_account_uri" {
+  description = "Exact staging or production ACME account URI discovered from Stalwart by the automated bootstrap. Null keeps the mail CAA exception absent and the apex deny policy effective."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.stalwart_acme_account_uri == null ||
+      can(regex("^https://acme(-staging)?-v02[.]api[.]letsencrypt[.]org/acme/acct/[0-9]+$", var.stalwart_acme_account_uri))
+    )
+    error_message = "stalwart_acme_account_uri must be null or an exact Let's Encrypt staging or production ACME account URI."
+  }
+}
+
 variable "desec_ttl" {
   description = "TTL in seconds for managed node address records."
   type        = number
-  default     = 300
+  default     = 3600
 
   validation {
-    condition     = var.desec_ttl >= 60 && var.desec_ttl <= 86400
-    error_message = "desec_ttl must be between 60 and 86400 seconds."
+    condition     = var.desec_ttl >= 3600 && var.desec_ttl <= 86400
+    error_message = "desec_ttl must be between deSEC's 3600-second minimum and 86400 seconds."
   }
 }
 

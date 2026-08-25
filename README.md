@@ -112,10 +112,15 @@ Security controls are applied at every layer:
   enter only the child process that needs them. Ansible creates Podman secrets
   over standard input and renders no credentials into Quadlets.
 - **DNS:** the deSEC account retains zone lifecycle authority; OpenTofu owns the
-  selected shared RRsets, token, A/AAAA, and PTR declarations. Stalwart's child
-  token grants only reviewed owner-name/type pairs, exact DKIM selectors, and
-  apex CAA so its registered ACME account can publish its own issuance policy;
-  it has no zone-wide or TLSA authority.
+  selected shared RRsets, token, A/AAAA, PTR, CAA, DMARC, and TLS-RPT
+  declarations. The apex
+  critically denies TLS, wildcard, S/MIME, and BIMI mark-certificate issuance;
+  `mail` permits only Stalwart's exact Let's Encrypt account using DNS-01 and
+  denies every other certificate class. CAA incidents go to `caa@`, DMARC
+  aggregate reports to `dmarc@`, and SMTP TLS reports to `tls-rpt@` within the
+  mail domain. Stalwart's child token has no CAA, DMARC, or TLS-RPT authority,
+  no zone-wide authority, and TLSA grants only for the exact enabled public TLS
+  listener names.
 - **Supply chain:** provider locks, action commit pins, image digests, verified
   Stalwart server and CLI signatures and SLSA provenance, hash-locked CI tools,
   digest-pinned provisioning containers, a checksum-verified local Web UI, and
@@ -157,22 +162,34 @@ onto the resulting VPS, then render the inventory:
 make tofu-init
 make plan
 make apply
-make fcos-install
+make install
 make inventory
 ```
 
 Verify the server's SSH host key through an independent channel and store it in
-`Ansible/inventory/known_hosts`. Bootstrap Stalwart, complete its domain and
-certificate setup, save the scoped configuration API key in SOPS, then apply
-the hardening plan and remove the bootstrap publication:
+`Ansible/inventory/known_hosts`. Run the automated Stalwart bootstrap, then save
+the separately scoped hardening API key in SOPS and apply the production
+hardening plan:
 
 ```bash
-make deploy-bootstrap
+make stalwart-bootstrap
 make sops-mail-edit
 make stalwart-harden
 make deploy
 make stalwart-audit
 ```
+
+`make stalwart-bootstrap` generates a fresh 256-bit recovery credential for
+that invocation and installs it as a temporary server-side Podman secret. It
+creates and later removes the loopback bootstrap listener and SSH tunnel,
+installs the verified local Web UI, configures deSEC, Domain, DKIM, and
+production Let's Encrypt ACME, using staging only on the first rollout, grants
+only the exact DKIM selectors to the deSEC child token, and verifies the
+trusted certificate plus the
+OpenTofu-owned apex/mail CAA, DMARC, and TLS-RPT policy. Before revoking the recovery credential,
+it displays it once and waits for a regular administrator to be created and
+tested through the Web UI. The
+credential is never stored in the repository or SOPS.
 
 The direct installer uses the final server itself and creates no snapshot. Its
 OpenTofu-owned marker prevents an accidental second disk installation unless

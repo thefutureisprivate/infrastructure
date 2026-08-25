@@ -1,0 +1,98 @@
+---
+- name: "Validate Hetzner IPv6 role paths on the controller"
+  ansible.builtin.assert:
+    that:
+      - "hetzner_ipv6_script_path == '/usr/local/sbin/configure-hetzner-ipv6'"
+      - "hetzner_ipv6_unit_path == '/etc/systemd/system/hetzner-ipv6.service'"
+      - "hetzner_ipv6_systemctl_binary == '/usr/bin/systemctl'"
+    fail_msg: "Hetzner IPv6 files and systemctl must use their fixed absolute paths."
+    quiet: true
+  delegate_to: "localhost"
+  become: false
+
+- name: "Atomically install the Hetzner IPv6 metadata configurator"
+  ansible.builtin.raw: |
+    set -eu
+    destination={{ item.path | quote }}
+    mode={{ item.mode | quote }}
+    payload={{ item.content | b64encode | quote }}
+    wanted_sha256="$(printf '%s' "$payload" | base64 -d | sha256sum | cut -d' ' -f1)"
+    if [ -f "$destination" ] && [ ! -L "$destination" ] \
+      && [ "$(sha256sum "$destination" | cut -d' ' -f1)" = "$wanted_sha256" ] \
+      && [ "$(stat -c '%a:%u:%g' "$destination")" = "${mode#0}:0:0" ]; then
+      exit 0
+    fi
+    if [ -L "$destination" ] || { [ -e "$destination" ] && [ ! -f "$destination" ]; }; then
+      printf 'Refusing unsafe Hetzner IPv6 destination: %s\n' "$destination" >&2
+      exit 1
+    fi
+    temporary="$(mktemp "${destination}.XXXXXX")"
+    trap 'rm -f "$temporary"' EXIT HUP INT TERM
+    printf '%s' "$payload" | base64 -d >"$temporary"
+    install -m "$mode" -o root -g root "$temporary" "$destination"
+    rm -f "$temporary"
+    trap - EXIT HUP INT TERM
+    printf '%s\n' CHANGED
+  loop:
+    - path: "{{ hetzner_ipv6_script_path }}"
+      mode: "0755"
+      content: "{{ lookup('ansible.builtin.file', role_path ~ '/../../../Butane/files/configure-hetzner-ipv6.sh') }}\n"
+    - path: "{{ hetzner_ipv6_unit_path }}"
+      mode: "0644"
+      content: |
+        [Unit]
+        Description=Configure the static IPv6 address supplied by Hetzner metadata
+        Documentation=https://docs.hetzner.cloud/#server-metadata
+        Wants=network-online.target
+        After=NetworkManager.service network-online.target
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/local/sbin/configure-hetzner-ipv6
+        NoNewPrivileges=yes
+        PrivateDevices=yes
+        PrivateTmp=yes
+        ProtectClock=yes
+        ProtectControlGroups=yes
+        ProtectHome=yes
+        ProtectHostname=yes
+        ProtectKernelLogs=yes
+        ProtectKernelModules=yes
+        ProtectKernelTunables=yes
+        ProtectSystem=strict
+        RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+        RestrictNamespaces=yes
+        RestrictRealtime=yes
+        RestrictSUIDSGID=yes
+        SystemCallArchitectures=native
+
+        [Install]
+        WantedBy=multi-user.target
+  loop_control:
+    label: "{{ item.path }}"
+  register: "hetzner_ipv6_files_result"
+  changed_when: "'CHANGED' in (hetzner_ipv6_files_result.stdout_lines | default([]))"
+  notify: "Reconcile changed Hetzner IPv6 configuration"
+
+- name: "Apply changed Hetzner IPv6 configuration before service checks"
+  ansible.builtin.meta: "flush_handlers"
+
+- name: "Ensure Hetzner IPv6 configuration is enabled and active"
+  ansible.builtin.raw: |
+    set -eu
+    systemctl_bin={{ hetzner_ipv6_systemctl_binary | quote }}
+    changed=0
+    if ! "$systemctl_bin" is-enabled --quiet hetzner-ipv6.service; then
+      "$systemctl_bin" enable hetzner-ipv6.service >/dev/null
+      changed=1
+    fi
+    if ! "$systemctl_bin" is-active --quiet hetzner-ipv6.service; then
+      "$systemctl_bin" start hetzner-ipv6.service
+      changed=1
+    fi
+    if [ "$changed" -eq 1 ]; then
+      printf '%s\n' CHANGED
+    fi
+  register: "hetzner_ipv6_service_result"
+  changed_when: "'CHANGED' in (hetzner_ipv6_service_result.stdout_lines | default([]))"

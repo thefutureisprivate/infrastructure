@@ -8,19 +8,23 @@ After=gvisor-install.service mail-postgres.service network-online.target
 Image={{ mail_stalwart_image }}
 Pull=missing
 PodmanArgs=--runtime=runsc
+SecurityLabelDisable=true
+HostName={{ inventory_hostname }}
 ContainerName=mail-stalwart
-Network=mail.network
+Network=mail-dualstack.network
 Volume=mail-stalwart-data.volume:/var/lib/stalwart
-Volume={{ quadlet_directory }}/stalwart-config.json:/etc/stalwart/config.json:ro,Z
-Volume={{ mail_stalwart_webui_host_path }}:{{ mail_stalwart_webui_container_path }}:ro,Z
+Volume={{ quadlet_directory }}/stalwart-config.json:/etc/stalwart/config.json:ro
+Volume={{ mail_stalwart_webui_host_path }}:{{ mail_stalwart_webui_container_path }}:ro
 Secret=mail-postgres-password,type=env,target=STALWART_DB_PASSWORD
 Secret=stalwart-desec-api-token,type=env,target=STALWART_DESEC_API_TOKEN
 Environment=STALWART_PUBLIC_URL=https://{{ mail_hostname }}
+Environment=STALWART_HOSTNAME={{ inventory_hostname }}
 PublishPort=25:25
 PublishPort=443:443
 PublishPort=465:465
 PublishPort=993:993
 {% if mail_stalwart_bootstrap_listener | bool %}
+Secret={{ mail_stalwart_bootstrap_secret_name }},type=env,target=STALWART_RECOVERY_ADMIN
 PublishPort=127.0.0.1:8080:8080
 {% endif %}
 ReadOnly=true

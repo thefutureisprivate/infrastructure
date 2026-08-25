@@ -5,8 +5,29 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "${script_dir}/.." && pwd)
 compose_file="${repo_root}/Ansible/compose.yaml"
 plan_file="${repo_root}/Stalwart/hardening.ndjson"
+mta_sts_plan_file="${repo_root}/Stalwart/mta-sts.ndjson"
 stalwart_url=${STALWART_URL:-https://mail.thefutureisprivate.dev}
+mta_sts_url=${MTA_STS_URL:-https://mta-sts.thefutureisprivate.dev/.well-known/mta-sts.txt}
 runtime=${STALWART_CLI_RUNTIME:-}
+runtime_token_secret=''
+
+cleanup() {
+  local status=$?
+  trap - EXIT HUP INT TERM
+  unset STALWART_CONFIG_API_TOKEN STALWART_TOKEN STALWART_URL
+  if [[ -n ${runtime_token_secret} ]]; then
+    if ! container_engine podman secret rm "${runtime_token_secret}" >/dev/null 2>&1; then
+      printf 'Failed to remove transient Podman secret %s; remove it manually.\n' \
+        "${runtime_token_secret}" >&2
+      status=1
+    fi
+  fi
+  exit "${status}"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 usage() {
   printf 'Usage: %s apply|audit\n' "$0" >&2
@@ -31,6 +52,10 @@ done
 
 if [[ ${stalwart_url} != https://* ]]; then
   printf 'STALWART_URL must use https://; refusing cleartext administration\n' >&2
+  exit 1
+fi
+if [[ ${mta_sts_url} != https://* ]]; then
+  printf 'MTA_STS_URL must use https://; refusing cleartext policy verification\n' >&2
   exit 1
 fi
 if [[ -z ${STALWART_CONFIG_API_TOKEN:-} ]]; then
@@ -61,6 +86,26 @@ if ! command -v "${runtime}" >/dev/null 2>&1; then
   exit 1
 fi
 
+container_engine() {
+  local engine=$1
+  shift
+  if [[ ${engine} == podman && -n ${CONTAINER_ID:-} ]] && \
+    command -v distrobox-host-exec >/dev/null 2>&1; then
+    distrobox-host-exec podman "$@"
+  else
+    "${engine}" "$@"
+  fi
+}
+
+if ! container_engine "${runtime}" info >/dev/null 2>&1; then
+  if [[ ${runtime} == podman && -n ${CONTAINER_ID:-} ]]; then
+    printf 'The host Podman engine is unreachable through distrobox-host-exec.\n' >&2
+  else
+    printf '%s is installed but its container service is unreachable.\n' "${runtime}" >&2
+  fi
+  exit 1
+fi
+
 mapfile -t cli_images < <(
   sed -nE 's/^[[:space:]]*image:[[:space:]]*"(docker\.io\/stalwartlabs\/cli:[^"]+)"[[:space:]]*$/\1/p' \
     "${compose_file}"
@@ -72,18 +117,47 @@ fi
 cli_image=${cli_images[0]}
 
 export STALWART_URL=${stalwart_url}
-export STALWART_TOKEN=${STALWART_CONFIG_API_TOKEN}
-unset STALWART_CONFIG_API_TOKEN
+
+if [[ ${runtime} == podman ]]; then
+  token_secret_id=$(openssl rand -hex 16)
+  if [[ ! ${token_secret_id} =~ ^[0-9a-f]{32}$ ]]; then
+    printf 'OpenSSL did not generate the expected token-secret identifier.\n' >&2
+    exit 1
+  fi
+  runtime_token_secret="stalwart-hardening-token-${token_secret_id}"
+  if ! printf '%s' "${STALWART_CONFIG_API_TOKEN}" | \
+    container_engine podman secret create "${runtime_token_secret}" - >/dev/null; then
+    runtime_token_secret=''
+    printf 'Failed to create the transient host-Podman API-token secret.\n' >&2
+    exit 1
+  fi
+  unset STALWART_CONFIG_API_TOKEN
+else
+  export STALWART_TOKEN=${STALWART_CONFIG_API_TOKEN}
+  unset STALWART_CONFIG_API_TOKEN
+fi
 
 run_cli() {
-  "${runtime}" run --rm --interactive --read-only \
-    --cap-drop=all \
-    --security-opt=no-new-privileges \
-    --tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 \
-    --env XDG_CACHE_HOME=/tmp/cache \
-    --env STALWART_URL \
-    --env STALWART_TOKEN \
-    "${cli_image}" --no-color "$@"
+  local -a container_args=(
+    run
+    --rm
+    --interactive
+    --read-only
+    --cap-drop=all
+    --security-opt=no-new-privileges
+    "--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777"
+    --env XDG_CACHE_HOME=/tmp/cache
+    --env "STALWART_URL=${STALWART_URL}"
+  )
+  if [[ ${runtime} == podman ]]; then
+    container_args+=(
+      --secret "${runtime_token_secret},type=env,target=STALWART_TOKEN"
+    )
+  else
+    container_args+=(--env STALWART_TOKEN)
+  fi
+  container_args+=("${cli_image}" --no-color "$@")
+  container_engine "${runtime}" "${container_args[@]}"
 }
 
 expected_listeners=$(jq -cS -s '
@@ -94,6 +168,11 @@ expected_listeners=$(jq -cS -s '
   };
   map(select(."@type" == "reconcile" and .object == "NetworkListener"))[0]
     .value | [.[] | managed] | sort_by(.name)
+' "${plan_file}")
+expected_inbound_throttle=$(jq -cS -s '
+  map(select(."@type" == "upsert" and .object == "MtaInboundThrottle"))[0]
+    .value | to_entries[0].value
+    | {enable, description, key, match, rate}
 ' "${plan_file}")
 expected_http=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "Http"))[0].value
@@ -107,6 +186,9 @@ expected_auth=$(jq -cS -s '
 expected_mail=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "MtaStageMail"))[0].value
 ' "${plan_file}")
+expected_mta_sts=$(jq -cS -s '
+  map(select(."@type" == "update" and .object == "MtaSts"))[0].value
+' "${mta_sts_plan_file}")
 expected_applications=$(jq -cS -s '
   def managed: {
     enabled, description, resourceUrl, urlPrefix,
@@ -117,17 +199,22 @@ expected_applications=$(jq -cS -s '
 ' "${plan_file}")
 
 actual_listeners=''
+actual_inbound_throttle=''
 actual_http=''
 actual_webdav=''
 actual_auth=''
 actual_mail=''
+actual_mta_sts=''
 actual_applications=''
 
 read_actual_configuration() {
-  local listener_ndjson http_json webdav_json auth_json mail_json application_ndjson
+  local listener_ndjson inbound_throttle_ndjson http_json webdav_json auth_json mail_json mta_sts_json application_ndjson
 
   listener_ndjson=$(run_cli query NetworkListener \
     --fields name,bind,protocol,overrideProxyTrustedNetworks,useTls,tlsDisableCipherSuites,tlsDisableProtocols,tlsIgnoreClientOrder,tlsImplicit,tlsTimeout,maxConnections \
+    --json) || return 1
+  inbound_throttle_ndjson=$(run_cli query MtaInboundThrottle \
+    --fields enable,description,key,match,rate \
     --json) || return 1
   http_json=$(run_cli get Http --fields \
     rateLimitAuthenticated,rateLimitAnonymous,enableHsts,usePermissiveCors,responseHeaders,useXForwarded,redirectRoot \
@@ -141,6 +228,9 @@ read_actual_configuration() {
   mail_json=$(run_cli get MtaStageMail --fields \
     isSenderAllowed \
     --json) || return 1
+  mta_sts_json=$(run_cli get MtaSts --fields \
+    mode,maxAge,mxHosts \
+    --json) || return 1
   application_ndjson=$(run_cli query Application --fields \
     enabled,description,resourceUrl,urlPrefix,autoUpdateFrequency,unpackDirectory,oauthClientId \
     --json) || return 1
@@ -153,6 +243,13 @@ read_actual_configuration() {
     };
     [.[] | managed] | sort_by(.name)
   ' <<<"${listener_ndjson}")
+  actual_inbound_throttle=$(jq -cS -s '
+    def normalize_conditionals:
+      walk(if type == "object" and .match? == {} then del(.match) else . end);
+    map(select(.description == "Sender IP throttle"))
+    | if length == 1 then .[0] | {enable, description, key, match, rate} else . end
+    | normalize_conditionals
+  ' <<<"${inbound_throttle_ndjson}")
   actual_http=$(jq -cS '{
     rateLimitAuthenticated, rateLimitAnonymous, enableHsts,
     usePermissiveCors, responseHeaders, useXForwarded, redirectRoot
@@ -161,10 +258,18 @@ read_actual_configuration() {
     enableAssistedDiscovery, maxLockTimeout, maxLocks, deadPropertyMaxSize,
     livePropertyMaxSize, requestMaxSize, maxResults
   }' <<<"${webdav_json}")
-  actual_auth=$(jq -cS '{
-    maxFailures, waitOnFail, saslMechanisms, mustMatchSender, require
-  }' <<<"${auth_json}")
-  actual_mail=$(jq -cS '{isSenderAllowed}' <<<"${mail_json}")
+  actual_auth=$(jq -cS '
+    def normalize_conditionals:
+      walk(if type == "object" and .match? == {} then del(.match) else . end);
+    {maxFailures, waitOnFail, saslMechanisms, mustMatchSender, require}
+    | normalize_conditionals
+  ' <<<"${auth_json}")
+  actual_mail=$(jq -cS '
+    def normalize_conditionals:
+      walk(if type == "object" and .match? == {} then del(.match) else . end);
+    {isSenderAllowed} | normalize_conditionals
+  ' <<<"${mail_json}")
+  actual_mta_sts=$(jq -cS '{mode, maxAge, mxHosts}' <<<"${mta_sts_json}")
   actual_applications=$(jq -cS -s '
     map({
       enabled, description, resourceUrl, urlPrefix,
@@ -175,10 +280,12 @@ read_actual_configuration() {
 
 configuration_matches() {
   [[ ${actual_listeners} == "${expected_listeners}" ]] &&
+    [[ ${actual_inbound_throttle} == "${expected_inbound_throttle}" ]] &&
     [[ ${actual_http} == "${expected_http}" ]] &&
     [[ ${actual_webdav} == "${expected_webdav}" ]] &&
     [[ ${actual_auth} == "${expected_auth}" ]] &&
     [[ ${actual_mail} == "${expected_mail}" ]] &&
+    [[ ${actual_mta_sts} == "${expected_mta_sts}" ]] &&
     [[ ${actual_applications} == "${expected_applications}" ]]
 }
 
@@ -248,6 +355,31 @@ verify_live_dav_endpoints() {
     esac
   done
   printf 'CalDAV, CardDAV, and WebDAV HTTPS endpoints: verified\n'
+}
+
+verify_live_mta_sts_policy() {
+  local address_family policy
+  for address_family in -4 -6; do
+    policy=$(curl --fail --silent --show-error \
+      "${address_family}" \
+      --max-time 20 \
+      --proto '=https' \
+      --tlsv1.3 --tls-max 1.3 \
+      "${mta_sts_url}") || return 1
+    if ! awk '
+      { sub(/\r$/, "") }
+      $0 == "version: STSv1" { version++ }
+      $0 == "mode: enforce" { mode++ }
+      $0 == "max_age: 604800" { max_age++ }
+      $0 == "mx: mail.thefutureisprivate.dev" { mx++ }
+      END { exit(version == 1 && mode == 1 && max_age == 1 && mx == 1 ? 0 : 1) }
+    ' <<<"${policy}"; then
+      printf 'MTA-STS policy is not enforcing the expected MX over %s\n' \
+        "${address_family}" >&2
+      return 1
+    fi
+  done
+  printf 'Enforcing MTA-STS policy over IPv4 and IPv6: verified\n'
 }
 
 verify_tls_policy() {
@@ -353,16 +485,19 @@ audit() {
   read_actual_configuration
   if ! configuration_matches; then
     show_drift NetworkListener "${expected_listeners}" "${actual_listeners}"
+    show_drift MtaInboundThrottle "${expected_inbound_throttle}" "${actual_inbound_throttle}"
     show_drift Http "${expected_http}" "${actual_http}"
     show_drift WebDav "${expected_webdav}" "${actual_webdav}"
     show_drift MtaStageAuth "${expected_auth}" "${actual_auth}"
     show_drift MtaStageMail "${expected_mail}" "${actual_mail}"
+    show_drift MtaSts "${expected_mta_sts}" "${actual_mta_sts}"
     show_drift Application "${expected_applications}" "${actual_applications}"
     return 1
   fi
 
   printf 'Stalwart declarative hardening: in sync\n'
   verify_live_http_headers
+  verify_live_mta_sts_policy
   verify_live_dav_endpoints
   verify_tls_policy
 }
@@ -376,6 +511,7 @@ read_actual_configuration
 if configuration_matches; then
   printf 'Stalwart declarative hardening: already in sync\n'
   verify_live_http_headers
+  verify_live_mta_sts_policy
   verify_live_dav_endpoints
   verify_tls_policy
   exit
@@ -383,4 +519,7 @@ fi
 
 run_cli apply --stdin --dry-run <"${plan_file}"
 run_cli apply --stdin --json <"${plan_file}"
+run_cli apply --stdin --dry-run <"${mta_sts_plan_file}"
+run_cli apply --stdin --json <"${mta_sts_plan_file}"
+run_cli create Action/ReloadSettings >/dev/null
 audit

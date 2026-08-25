@@ -24,6 +24,12 @@ client-submission exception. POP3, ManageSieve, cleartext HTTP, ports 143 and
 587, and any other listener are deliberately absent. Outbound SMTP TLS policy
 is unchanged and continues to negotiate with receiving mail servers.
 
+The Quadlet pins `STALWART_HOSTNAME` to the unique Ansible inventory name
+(`mail-01` for this node). Stalwart uses that value only for its cluster-node
+lease; the public protocol identity remains `mail.thefutureisprivate.dev`.
+Container recreation therefore renews one stable lease instead of registering
+the new container ID as another cluster node.
+
 This mirrors GrapheneOS's current receiving policy: its Postfix
 [`smtpd_tls_security_level = encrypt`](https://github.com/GrapheneOS/mail.grapheneos.org/blob/main/postfix/main.cf#L66)
 requires STARTTLS for inbound SMTP, while its inbound protocol floor remains
@@ -34,44 +40,63 @@ delivery from legacy mail servers which cannot negotiate TLS 1.2 or newer.
 
 ## Secure Bootstrap
 
-Retrieve the temporary administrator credentials from the host:
+Run the automated bootstrap from the repository:
 
 ```bash
-ssh thefutureisprivate@mail.thefutureisprivate.dev \
-  sudo journalctl -u mail-stalwart.service --no-pager
+make stalwart-bootstrap
 ```
 
-In a separate terminal, create the only permitted TCP forward:
+The target generates a new 256-bit password for a one-run recovery
+administrator. It sends the combined credential over SSH standard input into
+a randomly named rootful Podman secret and references that secret only from the
+temporary bootstrap Quadlet. Inside Distrobox, a second transient host-Podman
+secret supplies the password to the pinned CLI without placing it in a process
+argument. It owns the entire listener and secret lifecycle, creates the
+authenticated SSH forward, and uses the CLI only over loopback. It installs
+the checksum-verified `file:///opt/stalwart-webui/webui.zip` Application,
+configures server identity,
+deSEC, automatic DKIM, staging and production DNS-01 ACME, applies exact DKIM
+selector token policies, verifies the trusted public certificate and
+OpenTofu-owned apex/mail CAA policy, and restores the production Quadlet on
+every exit.
+Before DNS publication it reconciles listeners to the requested protocols plus
+the temporary management endpoint, so Stalwart never requests deSEC authority
+for POP3, ManageSieve, cleartext IMAP, or cleartext submission SRV records. It
+performs the staging-to-production transition only on the first rollout: it
+returns certificate management to Manual, deletes only the verified staging
+certificate for the public hostname, and enables the production provider. The
+automatically scheduled production issuance can no longer be postponed by
+Stalwart's valid-certificate freshness guard.
 
-```bash
-ssh -N -L 127.0.0.1:8080:127.0.0.1:8080 \
-  thefutureisprivate@mail.thefutureisprivate.dev
-```
+At the final handoff the target displays the one-run recovery credential. Open
+`https://mail.thefutureisprivate.dev/admin`, create or repair a regular account
+with the built-in Admin role, sign out, and prove that the regular login works.
+Only then press Enter. The target verifies that a regular Admin account exists,
+restarts Stalwart without the recovery environment, and removes both transient
+secrets. Stalwart explicitly treats `STALWART_RECOVERY_ADMIN` as a backdoor, so
+it is never retained in the production Quadlet. If that production restart
+fails, the script leaves the named server secret intact and reports it instead
+of pretending the active recovery credential was revoked; repair with
+`make deploy` before deleting the reported secret.
 
-Run `make deploy-bootstrap` for this stage. Ansible downloads Web UI v1.0.8,
-verifies SHA-256
-`a3904b571aacca815eee2c38dd86de510d53304babe50b9576760bf70a36c0bf`,
-and mounts the bundle read-only. Before loading browser code, run:
-
-```bash
-make stalwart-webui-bootstrap
-```
-
-The pinned CLI prompts for the temporary password and reconciles the
-Application over the loopback tunnel to the verified
-`file:///opt/stalwart-webui/webui.zip` resource. Only after its readback check
-succeeds should you open `http://127.0.0.1:8080/admin`, replace the temporary
-administrator, and store a unique password in a password manager. The normal
-`make deploy` target omits this loopback publication.
+Ansible verifies Web UI v1.0.8 against SHA-256
+`a3904b571aacca815eee2c38dd86de510d53304babe50b9576760bf70a36c0bf`
+before mounting it read-only. Store the regular administrator's unique password
+in a password manager. Port 8080 is never exposed publicly.
 
 ## Declarative Hardening
 
-Do not run this step until the permanent certificate and
-`https://mail.thefutureisprivate.dev` are working. The plan in
+Run this step after `make stalwart-bootstrap` has verified the permanent
+certificate at `https://mail.thefutureisprivate.dev`. The plan in
 `Stalwart/hardening.ndjson` reconciles the complete listener set, so applying it
 also removes Stalwart's bootstrap HTTP, POP3S, and ManageSieve defaults. The
 HTTPS listener serves JMAP and all DAV protocols without another port or
 listener.
+
+The CSP authorizes Stalwart's pinned login bootstrap script by its exact
+SHA-256 hash; it does not enable general inline script execution. Recalculate
+and review that hash when upgrading the Stalwart image if the upstream login
+page changes.
 
 In the administrator UI, create an API key for the administrator account under
 Account › Credentials › API Keys. Name it `infrastructure-hardening`, use
@@ -83,6 +108,10 @@ Account › Credentials › API Keys. Name it `infrastructure-hardening`, use
 - `sysNetworkListenerUpdate`;
 - `sysNetworkListenerDestroy`;
 - `sysNetworkListenerQuery`;
+- `sysMtaInboundThrottleGet`;
+- `sysMtaInboundThrottleCreate`;
+- `sysMtaInboundThrottleUpdate`;
+- `sysMtaInboundThrottleQuery`;
 - `sysHttpGet`;
 - `sysHttpUpdate`;
 - `sysWebDavGet`;
@@ -91,6 +120,9 @@ Account › Credentials › API Keys. Name it `infrastructure-hardening`, use
 - `sysMtaStageAuthUpdate`;
 - `sysMtaStageMailGet`;
 - `sysMtaStageMailUpdate`;
+- `sysMtaStsGet`;
+- `sysMtaStsUpdate`;
+- `sysActionCreate`;
 - `sysApplicationGet`;
 - `sysApplicationCreate`;
 - `sysApplicationUpdate`;
@@ -104,14 +136,20 @@ place it in a shell command, `.env` file, or Quadlet. This key cannot log in to
 mail protocols and has no account, domain, DNS, queue, or secret-management
 permissions beyond the authentication prerequisite.
 
-Apply and verify the plan, then reconcile the production Quadlet to remove the
-bootstrap port publication:
+Apply and verify the plan, then reconcile the production Quadlet:
 
 ```bash
 make stalwart-harden
 make deploy
 make stalwart-audit
 ```
+
+The managed `Sender IP throttle` permits 25 new SMTP sessions per second from
+one remote IP. Stalwart's default of five silently closes the sixth connection
+before the SMTP greeting, which breaks standards scanners such as Internet.nl
+and can also disrupt bursty, legitimate receiving MTAs. Per-IP throttling,
+listener connection limits, and Stalwart's separate abuse and scanner bans
+remain enabled; no external sender is placed on a permanent allowlist.
 
 The apply command first reads the live settings. It performs no mutation when
 they already match, validates the plan before changing drifted settings, and
@@ -170,53 +208,94 @@ change, then `make stalwart-audit` to verify all three public DAV routes.
 
 ## deSEC and Mail Records
 
-Create a DNS Provider object with type `DeSEC`. Configure its secret as an
-environment-variable reference named `STALWART_DESEC_API_TOKEN`; do not paste
-the token into the database. The Quadlet already injects that Podman secret as
-an environment variable.
+`make stalwart-bootstrap` creates the `DeSEC` DNS Provider with an
+environment-variable secret reference named `STALWART_DESEC_API_TOKEN`; it
+never writes the token into Stalwart's database. The Quadlet injects that
+Podman secret as an environment variable.
 
-For the `thefutureisprivate.dev` Domain object:
+The committed declaration configures the `thefutureisprivate.dev` Domain to:
 
 - select automatic DNS management;
 - select the deSEC provider;
 - set the origin to `thefutureisprivate.dev`;
-- publish `dkim`, `spf`, `mx`, `dmarc`, `srv`, `mtaSts`, `tlsRpt`,
-  `caa`, `autoConfig`, `autoConfigLegacy`, and `autoDiscover`;
-- exclude `tlsa`; adding it later requires a reviewed exact token policy.
+- publish `dkim`, `tlsa`, `spf`, `mx`, `srv`, `mtaSts`, `autoConfig`,
+  `autoConfigLegacy`, and `autoDiscover`;
+- leave native `caa`, `dmarc`, and `tlsRpt` publication disabled because
+  OpenTofu owns those policy RRsets and can assign a distinct report address
+  to each class;
+- restrict deSEC TLSA grants to the enabled public listeners at
+  `_25._tcp.mail`, `_443._tcp.mail`, `_465._tcp.mail`, `_993._tcp.mail`, and
+  `_443._tcp.mta-sts`.
 
 The child token is source-address restricted and grants only the exact
-owner-name/type pairs declared by OpenTofu. Copy every active DKIM selector
-from Stalwart's reviewed zone output into `stalwart_dkim_selectors`, run
-`make plan` and `make apply` again, and only then enable automatic publication.
-The initial infrastructure apply intentionally creates the child token without
-DKIM permissions because those selector names do not exist yet. For DKIM
-rotation, authorize the replacement selector first and remove the retired
-selector only after rollover. A denied record requires a reviewed policy
-change; never add a type-only or wildcard grant.
+owner-name/type pairs declared by OpenTofu. The bootstrap first creates the
+Domain with manual DNS and certificate management so Stalwart can generate its
+keys without publishing. It queries every active or retiring selector, writes
+them to ignored `OpenTofu/stalwart-dkim.generated.tfvars.json`, applies only the
+matching deSEC token policies, and only then enables automatic publication.
+Normal `make plan` runs automatically include that generated file, preventing
+a later full plan from deleting the selector grants.
+
+Re-run `make stalwart-bootstrap` after a DKIM rotation creates a replacement
+selector; it resynchronizes the exact selector set before retrying automatic
+publication. Remove a retired selector grant only after Stalwart has completed
+the rollover and no longer returns that key. A denied record requires a
+reviewed policy change; never add a type-only or wildcard grant.
+
+On an already-production Domain, the bootstrap briefly transitions only DNS
+management to manual immediately before restoring automatic DNS. Certificate
+management stays automatic and bound to the production provider. Stalwart
+v0.16.19 queues a managed DNS reconciliation on that manual-to-automatic
+transition; an automatic-to-automatic upsert alone does not retry a failed DNS
+task. The bootstrap then waits until deSEC's
+authoritative 3-1-1 SMTP TLSA matches the SPKI digest served over both IPv4 and
+IPv6. Because Stalwart treats even a transient deSEC 5xx response as a
+permanently failed DNS task, bootstrap performs up to three bounded
+manual-to-automatic refresh attempts, gives each task a six-minute processing
+window, and skips the transition entirely when the authoritative TLSA already
+matches.
 
 ## TLS and Web UI
 
-Create an ACME provider for Let's Encrypt using DNS-01 through the same deSEC
-provider and `contact@thefutureisprivate.dev` as the contact. Test issuance
-against the staging directory first, then switch to production. Configure the
-Domain for automatic certificate management, explicitly list
-`mail.thefutureisprivate.dev` as a subject alternative name, and do not leave
-the SAN set empty because Stalwart interprets an empty set as a wildcard
-request. Verify the certificate on 443, 465, and 993 before accepting users.
+The production hardening plan configures the global MTA-STS policy in
+`enforce` mode with a seven-day cache. Its MX set remains automatic, so
+Stalwart derives the permitted hosts from the managed system settings instead
+of duplicating mail-host configuration. `make stalwart-audit` requires the
+public policy to contain `mode: enforce`, `max_age: 604800`, and the managed MX
+over both IPv4 and IPv6. Configuration updates are activated through
+Stalwart's `ReloadSettings` action without restarting the mail service.
 
-Stalwart registers the production ACME account and then publishes the apex CAA
-RRset itself. Its generated `issue` value includes the provider's read-only
-`accountUri`, which has this shape:
+The bootstrap creates Let's Encrypt staging and production ACME providers with
+DNS-01 through the same deSEC provider and
+`contact@thefutureisprivate.dev` as the contact. It proves issuance against
+staging only when the managed Domain did not exist when the command began,
+then switches the Domain to production and waits for a trusted certificate.
+Every rerun keeps the production provider selected even if a public IPv4,
+IPv6, or MTA-STS probe fails transiently. A DNS reconciliation retry uses a
+separate manual-DNS declaration whose certificate management remains bound to
+the production provider, so maintenance cannot temporarily serve a staging
+certificate. Stalwart's Domain schema stores SANs as labels relative to the
+Domain, so the committed `mail` and `mta-sts` entries request both
+`mail.thefutureisprivate.dev` and `mta-sts.thefutureisprivate.dev`. The set is
+explicit and non-empty; an empty set would request a wildcard certificate.
+
+Stalwart registers the ACME accounts and exposes their read-only `accountUri`,
+which has this production shape:
 
 ```text
 https://acme-v02.api.letsencrypt.org/acme/acct/<ACCOUNT_ID>
 ```
 
-Verify the live CAA RRset after the automatic DNS task succeeds. The pinned
-v0.16.19 generator binds issuance to that exact account URI, but does not emit
-`validationmethods`, a critical flag, or `issuewild`; the explicit SAN and
-DNS-01 settings are therefore part of the required policy. Replacing the ACME
-provider makes Stalwart reconcile CAA to the replacement account.
+The bootstrap writes the URI to the ignored generated OpenTofu input. On the
+first rollout it switches the `mail` CAA RRset from staging to production
+before production issuance; reruns keep the production account URI throughout.
+That RRset is critical, binds both the account URI and `dns-01`, and explicitly
+denies wildcard issuance. The critically denying apex remains separate.
+Stalwart's `publishRecords.caa`, `publishRecords.dmarc`, and
+`publishRecords.tlsRpt` are disabled, and its deSEC token has no permission for
+those records. `mta-sts` is a CNAME to `mail`, so both explicit SANs use the
+same CAA exception. This split is necessary because Stalwart v0.16 exposes one
+shared Domain reporting URI for DMARC, TLS-RPT, and native CAA publication.
 
 Production never points Stalwart at a remote Web UI updater. Ansible verifies
 the exact upstream bytes before installing them, the Quadlet mounts the bundle
@@ -227,10 +306,25 @@ checksum, and declarative-plan change followed by deployment and live audit.
 ## Production DNS State
 
 Proton Mail is not part of the declared production configuration. Stalwart's
-automatic DNS task owns the apex MX and mail-policy TXT records, DKIM, service
-discovery, TLS reporting, and MTA-STS records, including the `mta-sts` endpoint
-alias and `_mta-sts` policy identifier. Stalwart also owns the account-bound
-apex CAA RRset. OpenTofu retains all non-authorized DNS names.
+automatic DNS task owns the apex MX and SPF records, DKIM, service discovery,
+TLSA, and MTA-STS records, including the `mta-sts` endpoint alias and
+`_mta-sts` policy identifier. OpenTofu owns the critically denying apex CAA
+RRset, the narrowly authorized `mail` exception, DMARC, and TLS-RPT. Stalwart
+retains no write authority over those four policy RRsets.
+
+Create `caa@thefutureisprivate.dev`, `dmarc@thefutureisprivate.dev`, and
+`tls-rpt@thefutureisprivate.dev` as aliases in the Web UI before publishing the
+records. They can target the existing `contact@thefutureisprivate.dev`
+mailbox, while preserving distinct envelope recipients for filtering. Account
+and alias lifecycle intentionally remains a Web UI operation. The resulting
+destinations are:
+
+| Report class | Address |
+| --- | --- |
+| CAA `iodef` incidents | `caa@thefutureisprivate.dev` |
+| DMARC aggregate reports | `dmarc@thefutureisprivate.dev` |
+| SMTP TLS aggregate reports | `tls-rpt@thefutureisprivate.dev` |
+| ACME and administrative contact | `contact@thefutureisprivate.dev` |
 
 Review the generated zone file before each DNS task, monitor the task result,
 and verify the public records from an independent DNSSEC-validating resolver.

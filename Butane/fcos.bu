@@ -100,6 +100,15 @@ storage:
       hard: false
       overwrite: true
   files:
+    - path: /etc/sudoers.d/60-thefutureisprivate
+      mode: 0440
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          thefutureisprivate ALL=(root) NOPASSWD: ALL
     - path: /etc/ssh/sshd_config.d/20-fcos-hardening.conf
       mode: 0644
       user:
@@ -404,9 +413,49 @@ storage:
         name: root
       contents:
         local: files/install-gvisor.sh
+    - path: /usr/local/sbin/configure-hetzner-ipv6
+      mode: 0755
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        local: files/configure-hetzner-ipv6.sh
 
 systemd:
   units:
+    - name: hetzner-ipv6.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Configure the static IPv6 address supplied by Hetzner metadata
+        Documentation=https://docs.hetzner.cloud/#server-metadata
+        Wants=network-online.target
+        After=NetworkManager.service network-online.target
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/usr/local/sbin/configure-hetzner-ipv6
+        NoNewPrivileges=yes
+        PrivateDevices=yes
+        PrivateTmp=yes
+        ProtectClock=yes
+        ProtectControlGroups=yes
+        ProtectHome=yes
+        ProtectHostname=yes
+        ProtectKernelLogs=yes
+        ProtectKernelModules=yes
+        ProtectKernelTunables=yes
+        ProtectSystem=strict
+        RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+        RestrictNamespaces=yes
+        RestrictRealtime=yes
+        RestrictSUIDSGID=yes
+        SystemCallArchitectures=native
+
+        [Install]
+        WantedBy=multi-user.target
     - name: gvisor-install.service
       enabled: true
       contents: |

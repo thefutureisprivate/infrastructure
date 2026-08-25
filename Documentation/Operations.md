@@ -50,6 +50,26 @@ the SMTP federation listener. It also fails if that listener accepts an
 unencrypted `MAIL FROM`, if any extra Stalwart listener exists, or if a client
 listener accepts TLS 1.2.
 
+Run the idempotent DNS and certificate bootstrap after rebuilding Stalwart,
+replacing its ACME account, or creating a new automatic DKIM selector:
+
+```bash
+make stalwart-bootstrap
+```
+
+It temporarily enables the loopback management listener, synchronizes the
+exact current DKIM selectors into the ignored generated OpenTofu variables,
+reconciles production DNS-01 ACME, uses staging only if no managed Domain
+existed when the run began, verifies public trust, and
+always restores the production Quadlet. It uses an ephemeral recovery
+credential and does not store it.
+
+Stalwart's cluster-node lease is pinned to the Ansible inventory hostname both
+as the container's operating-system hostname and through `STALWART_HOSTNAME`.
+This also keeps recovery-mode deployments from registering transient Podman
+container IDs. The stable identity is declarative, so routine reconciliation
+requires no separate cluster-registry audit or cleanup command.
+
 ## Service Diagnostics
 
 Check systemd state and recent logs:
@@ -69,6 +89,12 @@ sudo podman inspect --format '{{.OCIRuntime}} {{.State.Status}} {{.State.Health.
 sudo podman inspect --format '{{.OCIRuntime}} {{.State.Status}}' mail-stalwart
 sudo /usr/local/bin/runsc --version
 ```
+
+The shared `hetzner_ipv6` role and first-boot Ignition unit obtain each
+server's static IPv6 address, prefix, gateway, and interface MAC from Hetzner's
+link-local metadata service. They update only the matching NetworkManager
+connection and ignore metadata DNS servers so systemd-resolved retains the
+DNSSEC-validating Cloudflare DNS-over-TLS policy.
 
 Inspect generated unit definitions when Quadlet startup fails:
 
@@ -132,6 +158,13 @@ and validate a saved plan before applying.
 
 gVisor is installed by Ignition rather than a package manager. Its release and
 SHA-512 pin live in `Butane/files/install-gvisor.sh`.
+The installer extracts the archive's top-level binaries and its `gvisor-bin`
+sidecars in separate passes. This keeps the service's
+`RestrictSUIDSGID=yes` sandbox enabled while avoiding GNU tar's nested-path
+`openat2` incompatibility with that restriction on FCOS.
+The installer verifies the archive and every expected executable. The direct
+FCOS controller then runs `runsc --version` after boot, outside the install
+unit's intentionally PID-only `/proc`, before marking the node installed.
 
 To update it:
 
@@ -274,14 +307,14 @@ Before rebuilding:
 2. Review DNS TTLs, expected addresses, and mail-delivery impact.
 3. Preserve protected OpenTofu state and the age identity.
 4. Create and review an OpenTofu plan rather than making console-only changes.
-5. Apply the replacement, then run `make fcos-install`; the new server starts
+5. Apply the replacement, then run `make install`; the new server starts
    with a `pending` marker and is installed directly through Rescue.
 6. Re-establish SSH host-key trust through an independent channel.
 
 Delete protection and rebuild protection are enabled by default. Do not disable
 them casually or bypass the reviewed infrastructure lifecycle.
 
-`FCOS_REINSTALL=1 make fcos-install` deliberately overwrites the existing
+`FCOS_REINSTALL=1 make install` deliberately overwrites the existing
 server disk even when its marker is `installed`. It is intended only for a
 reviewed in-place reprovision after backups and should not replace the normal
 OpenTofu replacement workflow.

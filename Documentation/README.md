@@ -8,7 +8,7 @@ infrastructure repository.
 - [Architecture](Architecture.md) explains component ownership, data flow,
   runtime layout, and persistent state.
 - [DNS Ownership](DNS.md) records the imported deSEC zone, ownership split,
-  Stalwart-managed ACME CAA policy, and read-only zone-audit procedure.
+  OpenTofu-managed ACME CAA policy, and read-only zone-audit procedure.
 - [Deployment](Deployment.md) covers a first deployment from credentials to a
   running Quadlet stack.
 - [Operations](Operations.md) covers routine reconciliation, diagnostics,

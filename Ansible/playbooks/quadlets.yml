@@ -10,9 +10,18 @@
           - "mail_hostname is defined"
           - "mail_hostname is string"
           - "mail_hostname is match('^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$')"
+          - "inventory_hostname is match('^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')"
           - "mail_stalwart_bootstrap_listener is defined"
           - "mail_stalwart_bootstrap_listener is boolean"
-        fail_msg: "Mail deployment inputs must contain a valid hostname and boolean bootstrap state."
+          - "mail_stalwart_bootstrap_secret_name is defined"
+          - "mail_stalwart_bootstrap_secret_name is string"
+          - >-
+            (not mail_stalwart_bootstrap_listener) or
+            (mail_stalwart_bootstrap_secret_name is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,126}$'))
+        fail_msg: >-
+          Mail deployment inputs must contain valid public and cluster hostnames,
+          boolean bootstrap state, and a safe temporary Podman secret name whenever
+          bootstrap mode is enabled.
         quiet: true
       delegate_to: "localhost"
       become: false

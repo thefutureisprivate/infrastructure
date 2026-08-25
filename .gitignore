@@ -10,6 +10,7 @@
 /build/
 /Ansible/inventory/hosts.yml
 /Ansible/inventory/known_hosts
+/Ansible/inventory/known_hosts.old
 
 # OpenTofu
 **/.terraform/
@@ -20,6 +21,7 @@ crash.log
 crash.*.log
 /OpenTofu/terraform.tfvars
 /OpenTofu/*.auto.tfvars
+/OpenTofu/stalwart-dkim.generated.tfvars.json
 
 # Ansible
 *.retry

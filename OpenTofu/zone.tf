@@ -1,7 +1,9 @@
 locals {
   # These existing records are intentionally outside Stalwart's ownership.
   # Mail records at the zone apex and service-discovery names remain with
-  # Stalwart so DKIM rotation and mail-policy changes do not require OpenTofu.
+  # Stalwart so DKIM rotation and most mail-policy changes do not require
+  # OpenTofu. DMARC and TLS-RPT are exceptions because Stalwart v0.16 has one
+  # shared reporting URI and cannot route the two report classes separately.
   imported_zone_rrsets = {
     apex_https = {
       subname = "@"
@@ -26,6 +28,18 @@ locals {
       type    = "TXT"
       ttl     = 3600
       rdata   = ["\"v=spf1 -all\""]
+    }
+    dmarc = {
+      subname = "_dmarc"
+      type    = "TXT"
+      ttl     = 3600
+      rdata   = ["\"v=DMARC1; p=reject; rua=mailto:dmarc@thefutureisprivate.dev\""]
+    }
+    tls_reporting = {
+      subname = "_smtp._tls"
+      type    = "TXT"
+      ttl     = 3600
+      rdata   = ["\"v=TLSRPTv1; rua=mailto:tls-rpt@thefutureisprivate.dev\""]
     }
   }
 }

@@ -50,7 +50,21 @@ in `Documentation/Stalwart.md` and store its one-time secret with
 `make stalwart-harden` and `make stalwart-audit` decrypt it directly into the
 pinned, read-only Stalwart CLI container. The key uses `Replace` permission
 mode with only the baseline `authenticate` permission and the listener, HTTP,
-and SMTP-auth read/write permissions required by the committed plan.
+inbound SMTP throttle, SMTP-auth, MTA-STS, and settings-reload permissions
+required by the committed plan.
+
+`make stalwart-bootstrap` separately generates a fresh 256-bit recovery
+password. A direct CLI runtime receives it only in the scoped child environment;
+Distrobox uses a transient host-Podman secret, while the temporary server
+Quadlet reads `admin:<password>` from a separate rootful Podman secret. The exit
+trap restarts the production Quadlet without the recovery environment before
+removing both secrets. If that restart fails, it preserves and reports the
+server secret until `make deploy` succeeds rather than falsely treating the
+still-active recovery credential as revoked. The workflow decrypts the infrastructure scope solely
+for a targeted update of the exact generated DKIM token policies; the recovery
+password is never added to either SOPS file, a command argument, or a regular
+file. The generated selector variable file contains DNS labels, not secrets,
+and remains ignored to avoid environment-specific configuration drift in Git.
 
 The generated token is retained in OpenTofu state so it can be synchronized
 again. Use an encrypted remote backend with tightly restricted access before

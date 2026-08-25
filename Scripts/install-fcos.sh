@@ -17,6 +17,16 @@ coreos_installer_image=$("${repo_root}/Scripts/tool-image.sh" coreos-installer)
 remote_installer="${repo_root}/Scripts/install-fcos-rescue-remote.sh"
 api_base=https://api.hetzner.cloud/v1
 
+container_engine() {
+  local engine=$1
+  shift
+  if [[ ${engine} == podman && -n ${CONTAINER_ID:-} ]] && command -v distrobox-host-exec >/dev/null 2>&1; then
+    distrobox-host-exec podman "$@"
+  else
+    "${engine}" "$@"
+  fi
+}
+
 if [[ -z ${HCLOUD_TOKEN:-} ]]; then
   printf 'HCLOUD_TOKEN is required.\n' >&2
   exit 2
@@ -153,9 +163,9 @@ set_install_state() {
   api_request PUT "/servers/${server_id}" "${payload}"
 }
 
-power_cycle() {
+reset_server() {
   local server_id=$1 action_id
-  api_request POST "/servers/${server_id}/actions/powercycle" '{}'
+  api_request POST "/servers/${server_id}/actions/reset" '{}'
   action_id=$(jq -r '.action.id // empty' "${api_response}")
   wait_for_action "${action_id}"
 }
@@ -167,7 +177,22 @@ enable_rescue() {
   api_request POST "/servers/${server_id}/actions/enable_rescue" "${payload}"
   action_id=$(jq -r '.action.id // empty' "${api_response}")
   wait_for_action "${action_id}"
-  power_cycle "${server_id}"
+  reset_server "${server_id}"
+}
+
+verify_container_engine() {
+  local engine=$1
+  if container_engine "${engine}" info >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ ${engine} == podman && -n ${CONTAINER_ID:-} ]]; then
+    printf 'The host Podman engine is unreachable through distrobox-host-exec.\n' >&2
+    printf 'Run on the host, outside Distrobox: podman info\n' >&2
+  else
+    printf '%s is installed but its container service is unreachable.\n' "${engine}" >&2
+  fi
+  return 1
 }
 
 resolve_runtime() {
@@ -193,6 +218,7 @@ resolve_runtime() {
       exit 2
       ;;
   esac
+  verify_container_engine "${runtime}"
 }
 
 create_installer_bundle() {
@@ -206,7 +232,7 @@ create_installer_bundle() {
     mount_suffix=rw,Z
     user_namespace_args=(--userns=keep-id)
   fi
-  "${runtime}" run --rm --read-only \
+  container_engine "${runtime}" run --rm --read-only \
     "${user_namespace_args[@]}" \
     --user "$(id -u):$(id -g)" \
     --cap-drop=all \
@@ -364,11 +390,11 @@ install_target() {
     "${bundle_sha256}" "${ignition_sha256}" "${installer_sha256}"
 
   printf 'Rebooting node %s into Fedora CoreOS.\n' "${key}"
-  power_cycle "${server_id}"
+  reset_server "${server_id}"
   if ! wait_for_ssh \
     "thefutureisprivate@${address}" \
     "${fcos_known_hosts}" \
-    '. /etc/os-release; test "$ID" = fedora; test "${VARIANT_ID:-}" = coreos; test -e /run/ostree-booted'; then
+    '. /etc/os-release; test "$ID" = fedora; test "${VARIANT_ID:-}" = coreos; test -e /run/ostree-booted; sudo -n /usr/bin/true; systemctl is-active --quiet gvisor-install.service; /usr/local/bin/runsc --version >/dev/null'; then
     printf 'Timed out waiting for verified FCOS boot on node %s.\n' "${key}" >&2
     return 1
   fi

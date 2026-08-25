@@ -1,0 +1,7 @@
+---
+- name: "Reconcile the shared Fedora CoreOS host baseline"
+  hosts: "fcos"
+  gather_facts: false
+
+  roles:
+    - role: "hetzner_ipv6"

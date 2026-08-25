@@ -1,0 +1,21 @@
+---
+all:
+  children:
+    fcos:
+      children:
+        mail:
+          hosts:
+            ${mail_node.name}:
+              ansible_host: ${jsonencode(mail_node.connection_host)}
+              node_key: ${jsonencode(mail_node.key)}
+              mail_hostname: ${jsonencode(mail_hostname)}
+%{ if length(non_mail_nodes) > 0 ~}
+      hosts:
+%{ for key in sort(keys(non_mail_nodes)) ~}
+        ${non_mail_nodes[key].name}:
+          ansible_host: ${jsonencode(non_mail_nodes[key].connection_host)}
+          node_key: ${jsonencode(key)}
+%{ endfor ~}
+%{ endif ~}
+  vars:
+    ansible_user: "thefutureisprivate"

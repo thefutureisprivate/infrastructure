@@ -5,6 +5,7 @@ mail_container_images: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../co
 mail_postgres_image: "{{ mail_container_images.services.postgres.image }}"
 mail_stalwart_image: "{{ mail_container_images.services.stalwart.image }}"
 mail_stalwart_bootstrap_listener: false
+mail_stalwart_bootstrap_secret_name: "{{ lookup('ansible.builtin.env', 'STALWART_BOOTSTRAP_SECRET_NAME') }}"
 mail_stalwart_webui_url: "https://github.com/stalwartlabs/webui/releases/download/v1.0.8/webui.zip"
 mail_stalwart_webui_sha256: "a3904b571aacca815eee2c38dd86de510d53304babe50b9576760bf70a36c0bf"
 mail_stalwart_webui_host_path: "/var/lib/stalwart-webui/webui.zip"
@@ -31,11 +32,13 @@ quadlet_support_files:
     content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/stalwart-config.json.j2') }}"
 
 quadlet_units:
-  - name: "mail.network"
+  - name: "mail-dualstack.network"
+    service: "mail-dualstack-network.service"
     services:
       - "mail-stalwart.service"
       - "mail-postgres.service"
-    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail.network.j2') }}"
+      - "mail-dualstack-network.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-dualstack.network.j2') }}"
   - name: "mail-postgres-data.volume"
     services:
       - "mail-stalwart.service"
@@ -59,4 +62,6 @@ quadlet_units:
 
 # Deletions are always explicit. Add both the source filename and generated
 # service name here when retiring a unit.
-quadlet_absent_units: []
+quadlet_absent_units:
+  - name: "mail.network"
+    service: "mail-network.service"

@@ -87,6 +87,8 @@ SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
   --architecture "${architecture}" \
   --platform hetzner \
   --ignition-file "${ignition_file}" \
+  --append-karg rd.neednet=1 \
+  --append-karg ip=dhcp \
   --console tty0 \
   --console ttyS0,115200n8 \
   "${install_device}"

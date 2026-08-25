@@ -58,7 +58,7 @@ case "${method} ${url}" in
     printf '{"server":{}}\n' >"${output_file}"
     ;;
   "POST https://api.hetzner.cloud/v1/servers/101/actions/enable_rescue"|\
-  "POST https://api.hetzner.cloud/v1/servers/101/actions/powercycle")
+  "POST https://api.hetzner.cloud/v1/servers/101/actions/reset")
     printf '{"action":{"id":17}}\n' >"${output_file}"
     ;;
   "GET https://api.hetzner.cloud/v1/actions/17")

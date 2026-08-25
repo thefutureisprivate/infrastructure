@@ -29,14 +29,14 @@ if [[ $(<"${FCOS_TEST_API_STATE}") != installed ]]; then
   printf 'Direct installer did not record a verified installation.\n' >&2
   exit 1
 fi
-first_action_count=$(grep -cE '/actions/(enable_rescue|powercycle)' "${FCOS_TEST_API_LOG}")
+first_action_count=$(grep -cE '/actions/(enable_rescue|reset)' "${FCOS_TEST_API_LOG}")
 if [[ ${first_action_count} != 3 ]]; then
   printf 'Direct installer did not perform exactly one rescue activation and two required boots.\n' >&2
   exit 1
 fi
 
 "${repo_root}/Scripts/install-fcos.sh" >/dev/null
-second_action_count=$(grep -cE '/actions/(enable_rescue|powercycle)' "${FCOS_TEST_API_LOG}")
+second_action_count=$(grep -cE '/actions/(enable_rescue|reset)' "${FCOS_TEST_API_LOG}")
 if [[ ${second_action_count} != "${first_action_count}" ]]; then
   printf 'Direct installer repeated a destructive installation without authorization.\n' >&2
   exit 1
@@ -48,6 +48,24 @@ if "${repo_root}/Scripts/install-fcos-rescue-remote.sh" \
   "$(printf y | sha256sum | awk '{print $1}')" \
   "$(printf z | sha256sum | awk '{print $1}')" >/dev/null 2>&1; then
   printf 'Remote installer accepted an unsupported architecture.\n' >&2
+  exit 1
+fi
+
+for required_karg in rd.neednet=1 ip=dhcp; do
+  if ! grep -Fq -- "--append-karg ${required_karg}" \
+    "${repo_root}/Scripts/install-fcos-rescue-remote.sh"; then
+    printf 'Remote installer does not enable first-boot networking with %s.\n' \
+      "${required_karg}" >&2
+    exit 1
+  fi
+done
+if ! grep -Fq -- 'sudo -n /usr/bin/true' "${repo_root}/Scripts/install-fcos.sh"; then
+  printf 'Direct installer does not verify non-interactive operator sudo.\n' >&2
+  exit 1
+fi
+if ! grep -Fq -- '/usr/local/bin/runsc --version' \
+  "${repo_root}/Scripts/install-fcos.sh"; then
+  printf 'Direct installer does not verify the installed gVisor runtime.\n' >&2
   exit 1
 fi
 

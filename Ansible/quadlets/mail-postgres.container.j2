@@ -9,8 +9,9 @@ After=gvisor-install.service network-online.target
 Image={{ mail_postgres_image }}
 Pull=missing
 PodmanArgs=--runtime=runsc
+SecurityLabelDisable=true
 ContainerName=mail-postgres
-Network=mail.network
+Network=mail-dualstack.network
 NetworkAlias=postgres
 Volume=mail-postgres-data.volume:/var/lib/postgresql
 Secret=mail-postgres-password,type=mount,target=postgres-password

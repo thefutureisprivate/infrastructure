@@ -1,0 +1,4 @@
+---
+hetzner_ipv6_script_path: "/usr/local/sbin/configure-hetzner-ipv6"
+hetzner_ipv6_unit_path: "/etc/systemd/system/hetzner-ipv6.service"
+hetzner_ipv6_systemctl_binary: "/usr/bin/systemctl"

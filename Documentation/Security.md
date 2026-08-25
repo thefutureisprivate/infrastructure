@@ -60,7 +60,8 @@ drop-in directory by default. The baseline includes:
 - persistent, sealed, compressed journals bounded to 512 MiB and 14 days;
 - disabled process core dumps and masked coredump, debug-shell, kdump, and
   rpm-ostree count-me units, plus disabled automatic SSH socket generation;
-- SELinux labeling for host and container-mounted files.
+- enforcing host SELinux; the two gVisor containers alone disable unsupported
+  OCI process labels and rely on the userspace-kernel sandbox instead.
 
 The sysctl policy keeps `kernel.yama.ptrace_scope=1`, which is compatible with
 gVisor's default systrap platform. Strict reverse-path filtering is avoided
@@ -87,6 +88,15 @@ Mail application ports live in a second firewall attached only to
 `mail_server_node_key`. Other VPS nodes receive the same host hardening without
 receiving mail ingress or membership in the Ansible `mail` group.
 
+OpenTofu creates IPv4 and IPv6 addresses as explicit Hetzner Primary IP
+resources before creating each server. Both address families disable automatic
+deletion, enable Hetzner deletion protection, and use `prevent_destroy` so a
+server deletion cannot silently discard a stable address. Existing deployments
+adopt their current resource IDs through `primary_ip_import_ids` while retaining
+their existing attachment marker: the hcloud provider's automatic-to-explicit
+transition would otherwise unassign and try to delete the same live address.
+New nodes attach the protected Primary IP resources explicitly at creation.
+
 ## Direct Installation Boundary
 
 OpenTofu creates the final server and an operator SSH-key resource from the
@@ -107,7 +117,14 @@ The destructive step is constrained by several independent checks:
 - coreos-installer runs without `--insecure`, so Fedora's image signature must
   validate;
 - the marker changes to `installed` only after SSH observes Fedora CoreOS,
-  `VARIANT_ID=coreos`, and an ostree boot.
+  `VARIANT_ID=coreos`, an ostree boot, and working non-interactive operator
+  sudo.
+
+The key-only `thefutureisprivate` operator receives a user-specific
+`NOPASSWD` sudoers drop-in because Ansible reconciles root-owned host state.
+The operator's private SSH key is therefore a root-equivalent credential. The
+rule does not change Fedora's packaged sudo configuration or grant the same
+authority to every member of `wheel`.
 
 OpenTofu ignores drift only for that single installation-marker map element;
 all other server labels remain managed. A server marked `installed` is skipped
@@ -136,7 +153,8 @@ The installer:
 - retries transient failures without accepting HTTP errors;
 - verifies a pinned SHA-512 digest before extraction;
 - requires the new multi-file bundle layout and adjacent sidecars;
-- preserves SELinux rather than disabling container labels globally;
+- keeps host SELinux enforcing while only the two gVisor Quadlets disable the
+  unsupported per-container process label;
 - runs as a hardened one-shot systemd unit with a read-only filesystem except
   for its explicit installation paths.
 
@@ -212,8 +230,31 @@ the desired SHA-256 hash in a root-only directory to support idempotence.
 The Stalwart configuration key is never installed on the server; it is exposed
 only to the one local CLI child process. Its Replace-mode permission set covers
 only the authentication prerequisite and the NetworkListener, Application,
-Http, WebDav, MtaStageAuth, and MtaStageMail objects; the key cannot
-authenticate to a mail or DAV protocol.
+Http, WebDav, MtaStageAuth, MtaStageMail, and MtaSts objects plus creation of
+the immediate ReloadSettings action; the key cannot authenticate to a mail or
+DAV protocol.
+
+Stalwart's cluster lease identity is explicitly set to the validated, unique
+Ansible inventory hostname. This avoids treating Podman's per-container ID as
+a new node after every security update, bootstrap deployment, or reconciliation
+restart. It does not alter the public mail hostname or certificate identity.
+
+The certificate bootstrap generates a fresh 256-bit recovery password for each
+invocation. The server receives `admin:<password>` through SSH standard input
+into a randomly named rootful Podman secret which only the temporary Quadlet
+maps to `STALWART_RECOVERY_ADMIN`. Direct CLI runtimes receive the password in
+the scoped child environment; the Distrobox-to-host bridge uses a separate
+transient host-Podman secret because host-spawn does not forward the caller's
+environment. The password is never written to SOPS, OpenTofu state, a command
+line, or a regular file. On every exit the trap first restores and restarts the
+production Quadlet without the recovery environment, then deletes the remote
+secret. If that restart fails, it instead preserves and reports the named
+server secret because deleting its stored definition would not revoke a value
+already injected into the running container. It always removes the local
+secret and SSH tunnel; the production reconciliation removes the loopback
+publication.
+Successful completion additionally requires the operator to create and test a
+regular Web UI administrator before the recovery backdoor is revoked.
 
 OpenTofu state still contains the generated Stalwart token. A `sensitive`
 output hides normal CLI display but does not encrypt state. Local ignored state
@@ -253,12 +294,15 @@ a separate default-deny child token that cannot:
 - authenticate from outside the mail server's declared public addresses.
 
 Every permissive child-token policy has an exact domain, subname, and type.
-DKIM selectors are explicit OpenTofu inputs; unrelated names, wildcard grants,
-TLSA, A, and AAAA are absent. The sole CAA grant is the mail-domain apex, where
-Stalwart publishes an `issue` record bound to its registered Let's Encrypt
-account URI. The pinned v0.16.19 generator does not add a validation-method
-constraint or wildcard-denial tag, so the production Domain must use DNS-01
-with an explicit non-wildcard SAN set.
+DKIM selectors are explicit generated OpenTofu inputs discovered from
+Stalwart before automatic publication; unrelated names, wildcard grants, A,
+and AAAA are absent. TLSA grants are limited to the five exact enabled public
+TLS listener names. CAA, DMARC, and TLS-RPT are absent from the child token and
+owned by OpenTofu, preventing Stalwart's shared reporting-URI setting from
+combining operational report destinations. OpenTofu critically denies issuance
+at the apex and permits only Stalwart's exact Let's Encrypt account via DNS-01
+at `mail`, with an explicit wildcard denial. The `mta-sts` CNAME follows the
+same CAA exception.
 
 ## Supply-Chain Boundary
 
@@ -294,22 +338,28 @@ image does not currently publish equivalent Sigstore evidence.
 
 - The service is a single node and has no automatic failover.
 - gVisor adds material I/O and networking overhead to PostgreSQL and Stalwart.
+- gVisor does not accept Podman's SELinux process label, so these two workloads
+  do not receive SELinux MCS separation; their container boundary relies on
+  gVisor, namespaces, read-only roots, and explicit mounts instead.
 - PostgreSQL traffic is unencrypted inside the private container network on one
   host. Isolation relies on Podman, gVisor, and host integrity.
 - Hetzner backups are not guaranteed to be application-consistent PostgreSQL
   backups.
-- Stalwart listener, HTTP, and SMTP-auth hardening is declarative; domain,
-  certificate, account lifecycle, mail policy, and reputation controls still
-  require application-level administration.
-- Native CAA ownership lets Stalwart keep the ACME account binding current, but
-  a compromise of Stalwart or its source-restricted deSEC token can replace the
-  apex CAA RRset. deSEC policies constrain owner name and type, not CAA values.
+- Stalwart listener, HTTP, SMTP-auth, Domain, DNS, DKIM, and certificate setup
+  is declarative; account lifecycle, mailbox policy, deliverability, and
+  reputation controls still require application-level administration.
+- The ignored generated OpenTofu input contains the public ACME account URI and
+  must be refreshed by `make stalwart-bootstrap` if an ACME provider is
+  replaced. The apex CAA policy critically denies TLS, wildcard, S/MIME, and
+  BIMI mark-certificate issuance; the `mail` exception remains TLS-only and
+  account/method-bound. Stalwart cannot change CAA, DMARC, or TLS-RPT with its
+  child token.
 - The Stalwart Quadlet does not currently set no-new-privileges; its upstream
   image uses a file capability to bind ports below 1024 as UID 2000.
-- When explicitly enabled, the loopback-only Stalwart bootstrap is reachable
-  only through an authenticated SSH local forward restricted to
-  `127.0.0.1:8080`; the listener and publication are removed during production
-  hardening.
+- While the automated bootstrap is running, its loopback-only Stalwart endpoint
+  is reachable solely through an authenticated SSH local forward restricted to
+  `127.0.0.1:8080`; its exit trap restores the production Quadlet on success or
+  failure.
 - The host has no explicit outbound firewall allowlist.
 - Requiring three authenticated NTS sources improves time integrity but can
   leave the clock unsynchronized during a broad NTS outage.

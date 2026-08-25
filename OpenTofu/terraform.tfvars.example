@@ -14,6 +14,11 @@ nodes = {
 }
 mail_server_node_key = "01"
 
+# Existing deployments can adopt their current Hetzner Primary IP IDs here.
+# New deployments leave this empty; OpenTofu creates protected addresses first
+# and attaches them to the server.
+primary_ip_import_ids = {}
+
 # Stalwart services: federated SMTP, HTTPS/JMAP/admin, implicit-TLS SMTP
 # submission, and IMAPS. The temporary port 8080 bootstrap UI stays bound to
 # host loopback and is never admitted by the Hetzner firewall.
@@ -50,12 +55,12 @@ enable_delete_protection = true
 # deSEC is mandatory. The zone must already exist. The SOPS-injected
 # DESEC_API_TOKEN must read it, manage declared records, and mint child tokens.
 desec_domain = "example.com"
-desec_ttl    = 300
+desec_ttl    = 3600
 
-# Initial rollout starts empty. After Stalwart generates its keys, copy the
-# exact active selector labels from its reviewed zone, apply OpenTofu to grant
-# those names, and only then enable automatic DNS publication. Add replacement
-# selectors before rotation and retire old selectors after the rollover.
+# Initial rollout starts empty. `make stalwart-bootstrap` discovers the exact
+# selectors, writes an ignored generated override, applies only those token
+# policies, and then enables automatic publication. Do not populate this base
+# file; normal plans include the generated override when it exists.
 stalwart_dkim_selectors = []
 
 # The mail node must use a non-apex hostname so reverse DNS can match it.

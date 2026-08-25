@@ -26,21 +26,23 @@ families are rejected until the installer transport, Butane policy, and gVisor
 pin have an explicit ARM implementation.
 
 When running the operator tooling inside a rootless Distrobox, use the host's
-rootless Podman API rather than starting a second Podman engine against the
-host storage. Enable the socket once on the host:
+Podman engine rather than starting a second Podman engine against the shared
+host storage. Install Distrobox's host-command shim once inside the tools box:
 
 ```bash
-systemctl --user enable --now podman.socket
+sudo ln -sfn /usr/bin/distrobox-host-exec /usr/local/bin/podman
+hash -r
+podman info
 ```
 
-Then point the Podman client inside Distrobox at the mounted host socket and
-place transient bind-mounted files under the shared repository rather than the
-container-private `/tmp`:
+The repository scripts also detect Distrobox through `CONTAINER_ID` and invoke
+`distrobox-host-exec podman` directly, so they remain safe if the command shim
+is missing. Place transient bind-mounted files under the shared repository
+rather than the container-private `/tmp`:
 
 ```bash
-export CONTAINER_HOST="unix:///run/host/run/user/$(id -u)/podman/podman.sock"
 mkdir -p build
-TMPDIR="$PWD/build" make fcos-install
+TMPDIR="$PWD/build" make install
 ```
 
 Running local rootless Podman directly inside Distrobox is unsupported for
@@ -122,10 +124,12 @@ At minimum, replace `example.com` with the deSEC zone and review:
 - Hetzner location and CX23 server type;
 - the fleet-wide `nodes` map and `mail_server_node_key` role assignment;
 - the mail subname used for forward and reverse DNS;
-- `stalwart_dkim_selectors`; leave it empty for the first infrastructure apply,
-  then copy the exact selectors from Stalwart's reviewed generated zone and
-  apply OpenTofu again before automatic DNS publication is enabled;
+- `stalwart_dkim_selectors`; leave this bootstrap input empty because
+  `make stalwart-bootstrap` discovers the exact live selectors and writes the
+  ignored generated override before automatic DNS publication is enabled;
 - `mail_ingress_rules`, which are attached only to the selected mail node;
+- `primary_ip_import_ids`, which adopts an existing deployment's IPv4 and IPv6
+  resource IDs without changing their addresses (leave empty for new nodes);
 - billable backups and delete protection.
 
 SSH and ICMP rules are built into the base firewall shared by every node. SSH
@@ -133,6 +137,11 @@ accepts connections from all IPv4 and IPv6 sources by design, while
 authentication remains public-key only. The separate mail firewall is attached
 only to `mail_server_node_key`, so adding another VPS does not expose mail
 ports or enroll it in the mail Ansible group.
+
+Do not remove an existing node from `primary_ip_import_ids` as a routine
+change. The provider cannot safely convert its legacy automatic attachment to
+an explicit ID in place. Imported addresses are already protected independently;
+new nodes use explicit protected Primary IPs from their first creation.
 
 ## Plan and Apply
 
@@ -185,7 +194,7 @@ into Hetzner Rescue, overwrite its unmounted disk with signature-verified FCOS,
 and reboot it into the installed system:
 
 ```bash
-make fcos-install
+make install
 ```
 
 The command creates no temporary VPS and no snapshot. It extracts
@@ -193,8 +202,11 @@ The command creates no temporary VPS and no snapshot. It extracts
 `Tools/compose.yaml`, hashes the transferred bundle and Ignition document,
 activates Rescue through the Hetzner API, verifies that the target disk is a
 supported unmounted block device, and lets CoreOS Installer verify Fedora's OS
-image signature. After SSH confirms an FCOS ostree boot, the marker changes to
-`installed`. A normal second run skips that node.
+image signature. The installed kernel arguments enable DHCP in the initramfs so
+Afterburn can reach Hetzner's link-local metadata service before Ignition
+completes. After SSH confirms an FCOS ostree boot, the marker changes to
+`installed`; that final check also requires non-interactive operator sudo. A
+normal second run skips that node.
 
 Optional environment variables are:
 
@@ -212,6 +224,12 @@ activated. An interrupted installation leaves the marker at `installing`, so
 the same command can retry it. Once it reaches `installed`, only the explicit
 `FCOS_REINSTALL=1` override permits another disk overwrite.
 
+Ignition grants the key-only `thefutureisprivate` operator account a
+user-specific passwordless sudo rule. Ansible needs that privilege to
+reconcile root-owned Podman secrets, support files, and Quadlets. Treat the
+matching SSH private key as a root credential; no global `wheel` sudo policy is
+changed.
+
 The temporary Rescue SSH host key is accepted into an isolated temporary
 known-hosts file because Hetzner generates it on every Rescue boot. No secret
 application credentials are sent to Rescue. This does not establish trust in
@@ -226,7 +244,9 @@ make inventory
 ```
 
 The generated inventory includes every VPS in `fcos` and only the selected mail
-node in `mail`. Ansible enforces host-key checking and uses only
+node in `mail`. Its `ansible_host` values are the deSEC-managed node FQDNs, so
+OpenSSH can connect through either the published A or AAAA address and retry the
+other family if necessary. Ansible enforces host-key checking and uses only
 `Ansible/inventory/known_hosts`. Obtain the new server's host-key fingerprint
 through an independent trusted channel, such as the Hetzner console, and
 compare it before adding the key.
@@ -237,24 +257,62 @@ After verification, write the accepted public host key to:
 Ansible/inventory/known_hosts
 ```
 
+Pin the FQDN rather than only one address so the same verified key covers both
+address families, for example:
+
+```text
+mail.thefutureisprivate.dev ssh-ed25519 <VERIFIED_PUBLIC_HOST_KEY>
+```
+
 Do not treat an unauthenticated `ssh-keyscan` result as verification. Both the
 generated inventory and known-hosts file are ignored by Git.
 
-## Deploy Bootstrap Quadlets
+## Deploy and Bootstrap Stalwart
 
-Reconcile the mail stack with the temporary loopback-only bootstrap
-publication:
+Run the complete bootstrap workflow from an interactive terminal:
 
 ```bash
-make deploy-bootstrap
+make stalwart-bootstrap
 ```
 
-The mail playbook targets only the `mail` inventory group. It validates all
-controller-side inputs, downloads Web UI v1.0.8 and verifies its committed
-SHA-256 before an atomic root-owned install, creates rootful Podman secrets
-over SSH standard input, installs the private network and named volumes,
-writes support files and Quadlets atomically, reloads systemd, and starts or
-restarts changed services.
+The target generates a fresh 256-bit recovery password and then automatically:
+
+1. creates a randomly named rootful Podman secret on the server and reconciles
+   the mail stack with that recovery administrator plus a temporary
+   loopback-only HTTP listener;
+2. opens the permitted local SSH forward and uses the pinned Stalwart CLI;
+3. installs the checksum-verified local Web UI Application;
+4. configures the deSEC provider, server identity, services, Domain, automatic
+   DKIM, and both Let's Encrypt ACME providers;
+5. records the exact generated DKIM selectors and active ACME account URI in
+   the ignored `OpenTofu/stalwart-dkim.generated.tfvars.json` file, applies the
+   matching deSEC token policies, and publishes the OpenTofu-owned CAA, DMARC,
+   and TLS-RPT RRsets;
+6. on the first rollout only, proves DNS-01 issuance with Let's Encrypt
+   staging, switches to production, retires only that verified staging
+   certificate while certificate management is temporarily Manual, and
+   verifies the automatically issued,
+   hostname-valid production certificate and account/method-bound `mail` CAA
+   policy while the apex critically denies TLS, wildcard, S/MIME, and BIMI
+   mark-certificate issuance; reruns keep production certificate management
+   selected, including while managed DNS is refreshed;
+7. displays the one-run recovery credential so a regular administrator can be
+   created or repaired and tested at the trusted public Web UI;
+8. removes the SSH tunnel, reconciles the normal production Quadlet, and then
+   deletes the server-side recovery secret on every exit, including failure.
+   If the production reconciliation itself fails, the target deliberately
+   preserves the named secret and reports it so the still-running recovery
+   deployment remains repairable; run `make deploy`, then remove that exact
+   Podman secret as instructed.
+
+The recovery password exists only in bootstrap process memory and transient
+Podman secrets on the controller and server. It is not written to SOPS,
+OpenTofu variables, a command line, or a regular file. The mail playbook
+validates controller-side inputs, downloads Web UI v1.0.8 and
+verifies its committed SHA-256 before an atomic root-owned install, creates
+rootful Podman secrets over SSH standard input, installs the private network
+and named volumes, writes support files and Quadlets atomically, reloads
+systemd, and starts or restarts only changed services.
 
 Verify the result:
 
@@ -265,44 +323,12 @@ sudo podman ps
 sudo podman inspect --format '{{.OCIRuntime}}' mail-postgres mail-stalwart
 ```
 
-Both inspect results should identify `runsc`.
-
-## Complete Stalwart Setup
-
-Stalwart's HTTP bootstrap listener is bound to host loopback on port 8080. The
-Hetzner firewall does not expose it. The SSH drop-in permits only a local
-forward to that exact loopback destination. Start the authenticated tunnel:
-
-```bash
-ssh -N -L 127.0.0.1:8080:127.0.0.1:8080 \
-  thefutureisprivate@mail.thefutureisprivate.dev
-```
-
-Retrieve the one-time bootstrap credentials from the service log when needed:
-
-```bash
-sudo journalctl -u mail-stalwart.service
-```
-
-Before opening any Stalwart page, replace the server's default network-fetched
-Application with the checksum-verified read-only bundle already mounted by
-Ansible:
-
-```bash
-make stalwart-webui-bootstrap
-```
-
-The pinned CLI prompts for the temporary bootstrap password, connects only to
-`127.0.0.1:8080` through the tunnel, reconciles the Application to
-`file:///opt/stalwart-webui/webui.zip`, and reads it back. Only after that
-command succeeds should you open `http://127.0.0.1:8080/admin`. Do not expose
-port 8080 publicly.
-
-Follow [Stalwart Production Setup](Stalwart.md) for the exact identity,
-listeners, ACME, deSEC, account, DNS, and CAA settings. Confirm that
-`https://mail.thefutureisprivate.dev` works, create the narrowly scoped
-hardening API key documented there, and store its one-time secret as
-`STALWART_CONFIG_API_TOKEN`:
+Both inspect results should identify `runsc`. Confirm that
+`https://mail.thefutureisprivate.dev` now presents the trusted production
+certificate. Sign in to the verified Web UI with the regular administrator,
+create the narrowly scoped hardening API key
+documented in [Stalwart Production Setup](Stalwart.md), and store its one-time
+secret as `STALWART_CONFIG_API_TOKEN`:
 
 ```bash
 make sops-mail-edit
@@ -311,13 +337,13 @@ make deploy
 make stalwart-audit
 ```
 
-The hardening plan preserves the verified local Application, removes the
-cleartext bootstrap listener and all undeclared protocol listeners. The normal
-deployment removes the host-loopback port 8080 publication. Its final audit
-verifies the exact live Stalwart configuration, HTTPS response headers
-including CSP and HSTS, and hostname-valid implicit TLS on submission and
-IMAPS.
+The automated bootstrap has already removed the host-loopback port 8080
+publication. The hardening plan preserves the verified local Application and
+removes Stalwart's cleartext bootstrap listener and all undeclared protocol
+listeners. Its final audit verifies the exact live Stalwart configuration,
+HTTPS response headers including CSP and HSTS, and hostname-valid implicit TLS
+on submission and IMAPS.
 
-Application bootstrap and mail policy are intentionally separate from the
-infrastructure lifecycle. A server is not production-ready merely because the
-two containers are running.
+Application bootstrap and mail policy remain intentionally separate from the
+base infrastructure lifecycle. A server is not production-ready merely
+because the two containers are running.
