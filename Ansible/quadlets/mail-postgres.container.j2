@@ -11,7 +11,7 @@ Pull=missing
 PodmanArgs=--runtime=runsc
 SecurityLabelDisable=true
 ContainerName=mail-postgres
-Network=mail-dualstack.network
+Network=mail-postgres.network
 NetworkAlias=postgres
 Volume=mail-postgres-data.volume:/var/lib/postgresql
 Secret=mail-postgres-password,type=mount,target=postgres-password
@@ -24,6 +24,7 @@ HealthInterval=30s
 HealthTimeout=5s
 HealthRetries=5
 HealthStartPeriod=30s
+Notify=healthy
 NoNewPrivileges=true
 ReadOnly=true
 RunInit=true

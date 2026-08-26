@@ -93,6 +93,14 @@ also removes Stalwart's bootstrap HTTP, POP3S, and ManageSieve defaults. The
 HTTPS listener serves JMAP and all DAV protocols without another port or
 listener.
 
+Outbound delivery always selects the managed `default` TLS strategy. That
+strategy keeps DANE, MTA-STS, and STARTTLS available while refusing invalid
+certificates, and the selector has no retry branch that can switch to
+Stalwart's permissive `invalid-tls` strategy after a TLS error. STARTTLS stays
+optional for recipients that publish neither DANE nor MTA-STS, so this control
+prevents unauthenticated TLS rather than requiring every Internet recipient to
+support encryption.
+
 The CSP authorizes Stalwart's pinned login bootstrap script by its exact
 SHA-256 hash; it does not enable general inline script execution. Recalculate
 and review that hash when upgrading the Stalwart image if the upstream login
@@ -116,6 +124,12 @@ Account › Credentials › API Keys. Name it `infrastructure-hardening`, use
 - `sysMtaQueueQuotaCreate`;
 - `sysMtaQueueQuotaUpdate`;
 - `sysMtaQueueQuotaQuery`;
+- `sysMtaTlsStrategyGet`;
+- `sysMtaTlsStrategyCreate`;
+- `sysMtaTlsStrategyUpdate`;
+- `sysMtaTlsStrategyQuery`;
+- `sysMtaOutboundStrategyGet`;
+- `sysMtaOutboundStrategyUpdate`;
 - `sysHttpGet`;
 - `sysHttpUpdate`;
 - `sysImapGet`;
@@ -173,6 +187,11 @@ rejects the documented empty-key encoding for a strictly global queue quota, so
 the plan deliberately uses its supported `senderDomain` grouping instead of a
 non-applicable global declaration. Unauthenticated SMTP federation remains under
 its separate sender-IP throttle.
+
+The outbound TLS audit checks both sides of the policy reference: the selected
+strategy must be exactly `default`, without retry-dependent alternatives, and
+that named strategy must keep `allowInvalidCerts` false. Drift in either object
+fails `make stalwart-audit`.
 
 The authentication singleton explicitly uses Argon2id, requires passwords of at
 least 16 characters with Stalwart's `four` zxcvbn strength, and permits at most

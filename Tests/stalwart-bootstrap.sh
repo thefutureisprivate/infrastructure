@@ -247,4 +247,31 @@ grep -Fq -- 'HealthStartPeriod=60s' \
   "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
 grep -Fq -- 'HealthOnFailure=kill' \
   "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'Network=mail-dualstack.network' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'Network=mail-postgres.network' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'NoNewPrivileges=true' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'DropCapability=all' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'AddCapability=CAP_NET_BIND_SERVICE' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'Network=mail-postgres.network' \
+  "${repo_root}/Ansible/quadlets/mail-postgres.container.j2"
+if grep -Fq -- 'Network=mail-dualstack.network' \
+  "${repo_root}/Ansible/quadlets/mail-postgres.container.j2"; then
+  printf 'PostgreSQL must not join the externally routed mail network.\n' >&2
+  exit 1
+fi
+grep -Fq -- 'Notify=healthy' \
+  "${repo_root}/Ansible/quadlets/mail-postgres.container.j2"
+grep -Fq -- 'NetworkName=mail-postgres' \
+  "${repo_root}/Ansible/quadlets/mail-postgres.network.j2"
+grep -Fq -- 'Internal=true' \
+  "${repo_root}/Ansible/quadlets/mail-postgres.network.j2"
+grep -Fq -- 'mail-postgres.network' \
+  "${repo_root}/Ansible/inventory/group_vars/mail.yml"
+grep -Fq -- "quadlets/mail-postgres.network.j2" \
+  "${repo_root}/Ansible/inventory/group_vars/mail.yml"
 printf 'Stalwart automated bootstrap policy: OK\n'

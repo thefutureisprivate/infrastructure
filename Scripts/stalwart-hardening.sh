@@ -179,6 +179,21 @@ expected_queue_quotas=$(jq -cS -s '
     .value | [.[] | {enable, description, key, match, messages, size}]
     | sort_by(.description)
 ' "${plan_file}")
+expected_tls_strategies=$(jq -cS -s '
+  map(select(."@type" == "upsert" and .object == "MtaTlsStrategy"))[0]
+    .value
+    | [.[] | {
+        name, description, allowInvalidCerts, dane, mtaSts, startTls,
+        mtaStsTimeout, tlsTimeout
+      }]
+    | sort_by(.name)
+' "${plan_file}")
+expected_outbound_strategy=$(jq -cS -s '
+  def normalize_conditionals:
+    walk(if type == "object" and .match? == {} then del(.match) else . end);
+  map(select(."@type" == "update" and .object == "MtaOutboundStrategy"))[0].value
+    | normalize_conditionals
+' "${plan_file}")
 expected_http=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "Http"))[0].value
 ' "${plan_file}")
@@ -215,6 +230,8 @@ expected_applications=$(jq -cS -s '
 actual_listeners=''
 actual_inbound_throttles=''
 actual_queue_quotas=''
+actual_tls_strategies=''
+actual_outbound_strategy=''
 actual_http=''
 actual_imap=''
 actual_jmap=''
@@ -226,7 +243,7 @@ actual_mta_sts=''
 actual_applications=''
 
 read_actual_configuration() {
-  local listener_ndjson inbound_throttle_ndjson queue_quota_ndjson http_json imap_json jmap_json authentication_json webdav_json auth_json mail_json mta_sts_json application_ndjson
+  local listener_ndjson inbound_throttle_ndjson queue_quota_ndjson tls_strategy_ndjson outbound_strategy_json http_json imap_json jmap_json authentication_json webdav_json auth_json mail_json mta_sts_json application_ndjson
 
   listener_ndjson=$(run_cli query NetworkListener \
     --fields name,bind,protocol,overrideProxyTrustedNetworks,useTls,tlsDisableCipherSuites,tlsDisableProtocols,tlsIgnoreClientOrder,tlsImplicit,tlsTimeout,maxConnections \
@@ -236,6 +253,11 @@ read_actual_configuration() {
     --json) || return 1
   queue_quota_ndjson=$(run_cli query MtaQueueQuota \
     --fields enable,description,key,match,messages,size \
+    --json) || return 1
+  tls_strategy_ndjson=$(run_cli query MtaTlsStrategy \
+    --fields name,description,allowInvalidCerts,dane,mtaSts,startTls,mtaStsTimeout,tlsTimeout \
+    --json) || return 1
+  outbound_strategy_json=$(run_cli get MtaOutboundStrategy --fields tls \
     --json) || return 1
   http_json=$(run_cli get Http --fields \
     rateLimitAuthenticated,rateLimitAnonymous,enableHsts,usePermissiveCors,responseHeaders,useXForwarded,redirectRoot \
@@ -295,6 +317,22 @@ read_actual_configuration() {
     | sort_by(.description)
     | normalize_conditionals
   ' <<<"${queue_quota_ndjson}")
+  actual_tls_strategies=$(jq -cS -s \
+    --argjson expected "${expected_tls_strategies}" '
+    ($expected | map(.name)) as $owned_names
+    | [.[]
+      | select(.name as $name | $owned_names | index($name))
+      | {
+          name, description, allowInvalidCerts, dane, mtaSts, startTls,
+          mtaStsTimeout, tlsTimeout
+        }]
+    | sort_by(.name)
+  ' <<<"${tls_strategy_ndjson}")
+  actual_outbound_strategy=$(jq -cS '
+    def normalize_conditionals:
+      walk(if type == "object" and .match? == {} then del(.match) else . end);
+    {tls} | normalize_conditionals
+  ' <<<"${outbound_strategy_json}")
   actual_http=$(jq -cS '{
     rateLimitAuthenticated, rateLimitAnonymous, enableHsts,
     usePermissiveCors, responseHeaders, useXForwarded, redirectRoot
@@ -337,6 +375,8 @@ configuration_matches() {
   [[ ${actual_listeners} == "${expected_listeners}" ]] &&
     [[ ${actual_inbound_throttles} == "${expected_inbound_throttles}" ]] &&
     [[ ${actual_queue_quotas} == "${expected_queue_quotas}" ]] &&
+    [[ ${actual_tls_strategies} == "${expected_tls_strategies}" ]] &&
+    [[ ${actual_outbound_strategy} == "${expected_outbound_strategy}" ]] &&
     [[ ${actual_http} == "${expected_http}" ]] &&
     [[ ${actual_imap} == "${expected_imap}" ]] &&
     [[ ${actual_jmap} == "${expected_jmap}" ]] &&
@@ -546,6 +586,8 @@ audit() {
     show_drift NetworkListener "${expected_listeners}" "${actual_listeners}"
     show_drift MtaInboundThrottle "${expected_inbound_throttles}" "${actual_inbound_throttles}"
     show_drift MtaQueueQuota "${expected_queue_quotas}" "${actual_queue_quotas}"
+    show_drift MtaTlsStrategy "${expected_tls_strategies}" "${actual_tls_strategies}"
+    show_drift MtaOutboundStrategy "${expected_outbound_strategy}" "${actual_outbound_strategy}"
     show_drift Http "${expected_http}" "${actual_http}"
     show_drift Imap "${expected_imap}" "${actual_imap}"
     show_drift Jmap "${expected_jmap}" "${actual_jmap}"

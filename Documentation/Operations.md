@@ -43,12 +43,13 @@ make stalwart-audit
 
 The first target compares the live managed fields and skips the apply when
 there is no drift. The audit is read-only: it verifies the exact listener,
-HTTP, WebDAV, SMTP-auth, and MAIL-stage settings, checks all configured security
-headers and the CalDAV, CardDAV, and WebDAV routes over live HTTPS, requires TLS
-1.3 on ports 443, 465, and 993, and verifies TLS 1.2 STARTTLS compatibility on
-the SMTP federation listener. It also fails if that listener accepts an
-unencrypted `MAIL FROM`, if any extra Stalwart listener exists, or if a client
-listener accepts TLS 1.2.
+HTTP, WebDAV, SMTP-auth, MAIL-stage, and outbound TLS strategy settings. It
+checks all configured security headers and the CalDAV, CardDAV, and WebDAV
+routes over live HTTPS, requires TLS 1.3 on ports 443, 465, and 993, and verifies
+TLS 1.2 STARTTLS compatibility on the SMTP federation listener. It also fails
+if outbound delivery can select the invalid-certificate strategy, if that
+listener accepts an unencrypted `MAIL FROM`, if any extra Stalwart listener
+exists, or if a client listener accepts TLS 1.2.
 
 Run the idempotent DNS and certificate bootstrap after rebuilding Stalwart,
 replacing its ACME account, or creating a new automatic DKIM selector:

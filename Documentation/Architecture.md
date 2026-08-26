@@ -130,9 +130,9 @@ flowchart LR
     Quadlet before deleting the recovery secret.
 11. The pinned Stalwart CLI reconciles the committed hardening plan through a
     least-privilege SOPS-backed API key. It skips the mutation when the managed
-    live fields already match and audits configuration, HTTPS headers, DAV
-    routes, the TLS 1.3 client floor, and SMTP federation TLS 1.2 compatibility
-    afterwards.
+    live fields already match and audits configuration, the outbound TLS
+    strategy, HTTPS headers, DAV routes, the TLS 1.3 client floor, and SMTP
+    federation TLS 1.2 compatibility afterwards.
 
 Ignition is a first-boot mechanism. Changes under `Butane/` do not reconcile an
 already installed host; rebuild the server when those files change.
@@ -141,20 +141,24 @@ already installed host; rebuild the server when those files change.
 
 | Service | Host exposure | Persistent state | Runtime |
 | --- | --- | --- | --- |
-| PostgreSQL | None; private `mail` network only | `mail-postgres-data` named volume | gVisor `runsc` |
+| PostgreSQL | None; internal `mail-postgres` network only | `mail-postgres-data` named volume | gVisor `runsc` |
 | Stalwart SMTP federation | TCP 25, mandatory STARTTLS 1.2/1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin | TCP 443, TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart submission | TCP 465, implicit TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart IMAP | TCP 993, implicit TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart bootstrap HTTP | Temporary `127.0.0.1:8080` opt-in only | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 
-Both containers have read-only root filesystems and explicit writable volumes
-or tmpfs mounts. Stalwart's storage configuration references the PostgreSQL
-password by environment-variable name, and the restricted deSEC token is
-available for the later Stalwart DNS configuration. PostgreSQL receives its
-password through a mounted Podman secret. Both containers have runtime health
-checks; Stalwart's liveness probe causes systemd to restart an unresponsive
-service after three consecutive failures.
+Both containers have read-only root filesystems, no-new-privileges, and explicit
+writable volumes or tmpfs mounts. Stalwart alone joins the externally routed
+dual-stack network; it reaches PostgreSQL over a second Podman network marked
+internal, while PostgreSQL joins only that database network. Stalwart's storage
+configuration references the PostgreSQL password by environment-variable name,
+and the restricted deSEC token is available for the later Stalwart DNS
+configuration. PostgreSQL receives its password through a mounted Podman
+secret. Both containers have runtime health checks. PostgreSQL reports systemd
+startup only after its readiness probe passes, so Stalwart's dependency cannot
+start against an unready database. Stalwart's liveness probe causes systemd to
+restart an unresponsive service after three consecutive failures.
 
 ## DNS Authority
 

@@ -310,9 +310,9 @@ Podman secrets on the controller and server. It is not written to SOPS,
 OpenTofu variables, a command line, or a regular file. The mail playbook
 validates controller-side inputs, downloads Web UI v1.0.8 and
 verifies its committed SHA-256 before an atomic root-owned install, creates
-rootful Podman secrets over SSH standard input, installs the private network
-and named volumes, writes support files and Quadlets atomically, reloads
-systemd, and starts or restarts only changed services.
+rootful Podman secrets over SSH standard input, installs the public-service and
+internal database networks and named volumes, writes support files and Quadlets
+atomically, reloads systemd, and starts or restarts only changed services.
 
 Verify the result:
 

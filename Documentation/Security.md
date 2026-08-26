@@ -192,15 +192,19 @@ The installer:
   for its explicit installation paths.
 
 Both Quadlets add read-only roots, bounded tmpfs mounts, named persistent
-volumes, and a private network. PostgreSQL also sets no-new-privileges and has
-no published host port. Stalwart runs as the image's unprivileged UID 2000 and
-retains the image capability needed to bind privileged mail ports. It publishes
-only the services selected in OpenTofu variables. Its bootstrap HTTP publication
-is disabled by default and can be enabled only on host loopback for initial
-setup. Both containers expose internal health checks. Stalwart's probe uses the
-upstream liveness endpoint over HTTPS, falls back to the loopback bootstrap
-listener only while it exists, and kills the container after three failures so
-the systemd restart policy can recover it.
+volumes, and no-new-privileges. Stalwart alone joins the externally routed mail
+network and reaches PostgreSQL over a separate Podman network marked internal;
+PostgreSQL joins only that database network and has no published host port.
+Stalwart runs as the image's unprivileged UID 2000, drops Podman's default
+capabilities, and receives only `CAP_NET_BIND_SERVICE`, which the upstream image
+requires for privileged mail ports. It publishes only the services selected in
+OpenTofu variables. Its bootstrap HTTP publication is disabled by default and
+can be enabled only on host loopback for initial setup. Both containers expose
+internal health checks. PostgreSQL delays its systemd-ready notification until
+its readiness probe passes. Stalwart's probe uses the upstream liveness endpoint
+over HTTPS, falls back to the loopback bootstrap listener only while it exists,
+and kills the container after three failures so the systemd restart policy can
+recover it.
 
 ## Stalwart Boundary
 
@@ -219,8 +223,10 @@ and therefore require TLS 1.3. The port 25 federation listener deliberately
 keeps both TLS 1.2 and TLS 1.3 available for inbound server-to-server STARTTLS;
 the upgrade is mandatory before message transfer. This matches GrapheneOS's
 receiving policy while preserving compatibility with TLS 1.2-speaking MTAs.
-Outbound SMTP negotiation is unchanged. Stalwart's TLS library does not offer
-TLS 1.0 or TLS 1.1 on any listener.
+Outbound SMTP remains opportunistic for recipients without DANE or MTA-STS, but
+the selected TLS strategy always validates certificates and has no retry branch
+to Stalwart's permissive `invalid-tls` strategy. Stalwart's TLS library does not
+offer TLS 1.0 or TLS 1.1 on any listener.
 
 The HTTP singleton enables HSTS, keeps permissive CORS and untrusted forwarded
 addresses disabled, reduces anonymous and authenticated rate limits, and sets a
@@ -239,9 +245,10 @@ handling user credentials.
 
 The hardening client reads and compares the managed live fields before
 applying, so a matching second run performs no server mutation. Its audit then
-checks the configuration through Stalwart's API, the headers and DAV routes on
-live HTTPS responses, positive TLS 1.3 and negative TLS 1.2 handshakes on every
-client endpoint, and a positive TLS 1.2 STARTTLS handshake on port 25.
+checks the configuration and outbound TLS selector through Stalwart's API, the
+headers and DAV routes on live HTTPS responses, positive TLS 1.3 and negative
+TLS 1.2 handshakes on every client endpoint, and a positive TLS 1.2 STARTTLS
+handshake on port 25.
 It also opens a plaintext SMTP session solely to prove that STARTTLS is
 advertised and an unencrypted `MAIL FROM` is rejected.
 
@@ -377,13 +384,13 @@ image does not currently publish equivalent Sigstore evidence.
 - gVisor does not accept Podman's SELinux process label, so these two workloads
   do not receive SELinux MCS separation; their container boundary relies on
   gVisor, namespaces, read-only roots, and explicit mounts instead.
-- PostgreSQL traffic is unencrypted inside the private container network on one
-  host. Isolation relies on Podman, gVisor, and host integrity.
+- PostgreSQL traffic is unencrypted inside the dedicated internal container
+  network on one host. Isolation relies on Podman, gVisor, and host integrity.
 - Hetzner backups are not guaranteed to be application-consistent PostgreSQL
   backups.
 - Stalwart listener, HTTP, authentication, protocol limits, SMTP throttles,
-  queue quota, SMTP-auth, Domain, DNS, DKIM, and certificate setup is
-  declarative; account lifecycle, mailbox policy, deliverability, and
+  queue quota, SMTP-auth, outbound TLS, Domain, DNS, DKIM, and certificate
+  settings are declarative; account lifecycle, mailbox policy, deliverability, and
   reputation controls still require application-level administration.
 - The ignored generated OpenTofu input contains the public ACME account URI and
   must be refreshed by `make stalwart-bootstrap` if an ACME provider is
@@ -391,8 +398,6 @@ image does not currently publish equivalent Sigstore evidence.
   BIMI mark-certificate issuance; the `mail` exception remains TLS-only and
   account/method-bound. Stalwart cannot change CAA, DMARC, or TLS-RPT with its
   child token.
-- The Stalwart Quadlet does not currently set no-new-privileges; its upstream
-  image uses a file capability to bind ports below 1024 as UID 2000.
 - While the automated bootstrap is running, its loopback-only Stalwart endpoint
   is reachable solely through an authenticated SSH local forward restricted to
   `127.0.0.1:8080`; its exit trap restores the production Quadlet on success or

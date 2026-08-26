@@ -109,8 +109,9 @@ Security controls are applied at every layer:
   forwarding destination is the loopback Stalwart bootstrap listener. Port 22
   remains reachable from every address by design.
 - **Containers:** gVisor `runsc`, read-only root filesystems, bounded temporary
-  filesystems, private networking, PostgreSQL no-new-privileges, health-driven
-  systemd restarts, and explicit restart ordering.
+  filesystems, no-new-privileges, a dedicated internal PostgreSQL network,
+  health-gated startup and health-driven restarts, and explicit restart
+  ordering.
 - **Stalwart:** client protocols use implicit TLS only; SMTP port 25 remains a
   non-authenticated federation listener with mandatory STARTTLS before message
   transfer. HTTPS, submission, and IMAPS require TLS 1.3; SMTP federation
@@ -119,7 +120,8 @@ Security controls are applied at every layer:
   explicit resource bounds. Authentication uses an enforced Argon2id password
   policy, while IMAP, JMAP, authenticated submission, and the outbound queue
   have explicit abuse and resource limits. A declarative plan removes POP3,
-  ManageSieve, cleartext HTTP, and STARTTLS client listeners.
+  ManageSieve, cleartext HTTP, and STARTTLS client listeners, and prevents
+  outbound TLS retries from bypassing certificate validation.
 - **Secrets:** separate encrypted provider and mail scopes; decrypted values
   enter only the child process that needs them. Ansible creates Podman secrets
   over standard input and renders no credentials into Quadlets.

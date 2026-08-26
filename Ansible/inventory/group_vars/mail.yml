@@ -36,9 +36,15 @@ quadlet_units:
     service: "mail-dualstack-network.service"
     services:
       - "mail-stalwart.service"
-      - "mail-postgres.service"
       - "mail-dualstack-network.service"
     content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-dualstack.network.j2') }}"
+  - name: "mail-postgres.network"
+    service: "mail-postgres-network.service"
+    services:
+      - "mail-stalwart.service"
+      - "mail-postgres.service"
+      - "mail-postgres-network.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-postgres.network.j2') }}"
   - name: "mail-postgres-data.volume"
     services:
       - "mail-stalwart.service"
