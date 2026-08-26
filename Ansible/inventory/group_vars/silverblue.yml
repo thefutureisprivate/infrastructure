@@ -1,0 +1,354 @@
+---
+silverblue_automatic_update_policy: "stage"
+silverblue_hardening_enabled: true
+
+# Privacy-preserving host identity. NetworkManager reloads this policy without
+# disconnecting active links; randomized addresses take effect on reconnect.
+silverblue_hostname: "localhost"
+silverblue_network_mac_randomization: "random"
+
+# Drop unsolicited inbound traffic. These client-side discovery exceptions are
+# needed for IPv6, network printers/scanners, and local mDNS. Direct SMB,
+# WireGuard, SSH, and ordinary application traffic are outbound and stateful.
+silverblue_firewall_zone: "silverblue"
+silverblue_firewall_services:
+  - "dhcpv6-client"
+  - "ipp-client"
+  - "mdns"
+  - "ws-discovery-client"
+
+# CountMe is a tracking signal. The SSH server is denied independently of its
+# base-package removal so only the outbound OpenSSH client can be used.
+silverblue_masked_units:
+  - "rpm-ostree-countme.timer"
+  - "sshd.service"
+  - "sshd.socket"
+
+# Compatible subset of the PrivSec/Secureblue sysctl baseline. It deliberately
+# preserves unprivileged user namespaces, io_uring, binfmt_misc, ICMP echo, and
+# loose reverse-path validation for rootless Podman, KVM, and WireGuard.
+silverblue_sysctl_settings:
+  "dev.tty.ldisc_autoload": "0"
+  "fs.protected_fifos": "2"
+  "fs.protected_hardlinks": "1"
+  "fs.protected_regular": "2"
+  "fs.protected_symlinks": "1"
+  "fs.suid_dumpable": "0"
+  "kernel.core_pattern": "|/bin/false"
+  "kernel.dmesg_restrict": "1"
+  "kernel.kexec_load_disabled": "1"
+  "kernel.kptr_restrict": "2"
+  "kernel.oops_limit": "100"
+  "kernel.perf_event_paranoid": "3"
+  "kernel.printk": "3 3 3 3"
+  "kernel.randomize_va_space": "2"
+  "kernel.sysrq": "0"
+  "kernel.unprivileged_bpf_disabled": "2"
+  "kernel.warn_limit": "100"
+  "kernel.yama.ptrace_scope": "1"
+  "net.core.bpf_jit_harden": "2"
+  "net.ipv4.conf.*.accept_redirects": "0"
+  "net.ipv4.conf.*.accept_source_route": "0"
+  "net.ipv4.conf.*.rp_filter": "2"
+  "net.ipv4.conf.*.send_redirects": "0"
+  "net.ipv4.conf.all.log_martians": "1"
+  "net.ipv4.conf.default.log_martians": "1"
+  "net.ipv4.icmp_echo_ignore_broadcasts": "1"
+  "net.ipv4.icmp_ignore_bogus_error_responses": "1"
+  "net.ipv4.tcp_rfc1337": "1"
+  "net.ipv4.tcp_syncookies": "1"
+  "net.ipv4.tcp_timestamps": "0"
+  "net.ipv6.conf.*.accept_redirects": "0"
+  "net.ipv6.conf.*.accept_source_route": "0"
+  "net.ipv6.conf.all.use_tempaddr": "2"
+  "net.ipv6.conf.default.use_tempaddr": "2"
+  "vm.mmap_min_addr": "65536"
+  "vm.mmap_rnd_bits": "32"
+  "vm.mmap_rnd_compat_bits": "16"
+  "vm.unprivileged_userfaultfd": "0"
+
+# Block obsolete protocols and filesystems that are outside this workstation's
+# scope. Bluetooth, CIFS/SMB, NFS, USB storage, TUN/TAP, bridge, vhost, KVM,
+# SquashFS, ISO/UDF, and every normal local filesystem remain available.
+silverblue_blocked_kernel_modules:
+  - "adfs"
+  - "af_802154"
+  - "affs"
+  - "appletalk"
+  - "atm"
+  - "ax25"
+  - "batman-adv"
+  - "befs"
+  - "ceph"
+  - "coda"
+  - "cramfs"
+  - "dccp"
+  - "decnet"
+  - "econet"
+  - "freevxfs"
+  - "gfs2"
+  - "hfs"
+  - "hfsplus"
+  - "ipx"
+  - "jffs2"
+  - "jfs"
+  - "kafs"
+  - "lec"
+  - "mctp"
+  - "minix"
+  - "mpoa"
+  - "netrom"
+  - "nilfs2"
+  - "ocfs2"
+  - "orangefs"
+  - "p8022"
+  - "p8023"
+  - "psnap"
+  - "rds"
+  - "reiserfs"
+  - "romfs"
+  - "rose"
+  - "sctp"
+  - "sysv"
+  - "tipc"
+  - "ubifs"
+  - "ufs"
+  - "x25"
+  - "zonefs"
+
+# The common arguments avoid compatibility-sensitive 32-bit, SMT, emergency
+# recovery, and debugfs changes. CPU-specific IOMMU and KVM mitigations are
+# selected from gathered hardware facts.
+silverblue_kernel_arguments:
+  - "hash_pointers=always"
+  - "init_on_alloc=1"
+  - "init_on_free=1"
+  - "iommu.passthrough=0"
+  - "iommu.strict=1"
+  - "iommu=force"
+  - "kvm.mitigate_smt_rsb=1"
+  - "lockdown=confidentiality"
+  - "mitigations=auto"
+  - "module.sig_enforce=1"
+  - "page_alloc.shuffle=1"
+  - "proc_mem.force_override=ptrace"
+  - "pti=on"
+  - "random.trust_bootloader=off"
+  - "random.trust_cpu=off"
+  - "randomize_kstack_offset=on"
+  - "slab_nomerge"
+  - "spec_store_bypass_disable=on"
+  - "spectre_v2=on"
+  - "ssbd=force-on"
+  - "systemd.ssh_auto=no"
+  - "vsyscall=none"
+silverblue_intel_kernel_arguments:
+  - "intel_iommu=on"
+  - "kvm-intel.vmentry_l1d_flush=always"
+  - "l1d_flush=on"
+  - "l1tf=full,force"
+silverblue_amd_kernel_arguments:
+  - "amd_iommu=force_isolation"
+  - "kvm_amd.sev=1"
+  - "kvm_amd.sev_es=1"
+  - "kvm_amd.sev_snp=1"
+
+silverblue_chrony_nts_servers:
+  - "time.cloudflare.com"
+  - "ntppool1.time.nl"
+  - "nts.netnod.se"
+  - "ptbtime1.ptb.de"
+  - "time.dfm.dk"
+
+silverblue_faillock_deny: 5
+silverblue_faillock_interval: 900
+silverblue_faillock_unlock_time: 900
+
+# Fedora's OpenTofu package can lag the language version required by this
+# repository. Trust the official upstream RPM repository through committed,
+# checksum-pinned signing keys instead.
+silverblue_opentofu_repository:
+  file: "/etc/yum.repos.d/opentofu.repo"
+  baseurl: "https://packages.opentofu.org/opentofu/tofu/rpm_any/rpm_any/$basearch"
+  release_key:
+    url: "https://get.opentofu.org/opentofu.asc"
+    sha256: "3b20a1ef48c34c1ecfdafbe14133e19a4fe5770472f5650d701744b4f6d9450f"
+    path: "/etc/pki/rpm-gpg/RPM-GPG-KEY-opentofu.asc"
+  repository_key:
+    url: "https://packages.opentofu.org/opentofu/tofu/gpgkey"
+    sha256: "b918b1cf7302a9088568140505c0b4f1a2d534df650b4c5ef3ad6a9984ec710a"
+    path: "/etc/pki/rpm-gpg/RPM-GPG-KEY-opentofu-repository"
+
+# Layer only software that must integrate with or administer the host. Put other
+# CLI and development tooling in Toolbx instead.
+silverblue_layered_packages:
+  - "ansible-core"
+  - "glibc-langpack-de"
+  - "glibc-langpack-en"
+  - "gnome-console"
+  - "gnome-shell-extension-appindicator"
+  - "gnome-shell-extension-blur-my-shell"
+  - "hunspell-de"
+  - "libvirt-daemon-config-network"
+  - "libvirt-daemon-kvm"
+  - "make"
+  - "tofu"
+  - "trivalent"
+  - "trivalent-selinux"
+  - "virt-manager"
+  - "waypipe"
+silverblue_absent_layered_packages:
+  - "opentofu"
+  - "virt-install"
+
+# Fedora and the enabled Trivalent repository do not package SOPS. Install the
+# exact upstream binary into Silverblue's writable host-local prefix instead.
+silverblue_sops:
+  version: "3.13.3"
+  url: "https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64"
+  sha256: "e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b"
+  path: "/usr/local/bin/sops"
+
+# Keep the normal Fedora image as the dependency source of truth, but override
+# base packages that conflict with this workstation's explicitly narrow scope.
+# Printing, scanning, Bluetooth, WireGuard, SMB clients, KVM, and Podman remain.
+silverblue_removed_base_packages:
+  # Replaced applications, onboarding, and unused GNOME session variants.
+  - "fedora-bookmarks"
+  - "fedora-chromium-config"
+  - "firefox"
+  - "firefox-langpacks"
+  - "gnome-classic-session"
+  - "gnome-color-manager"
+  - "gnome-shell-extension-background-logo"
+  - "gnome-shell-extension-launch-new-instance"
+  - "gnome-shell-extension-places-menu"
+  - "gnome-shell-extension-window-list"
+  - "gnome-tour"
+  - "ptyxis"
+  - "yelp"
+
+  # Only German and English locales and input methods are required. The two
+  # glibc language packs above atomically replace glibc-all-langpacks.
+  - "anthy-unicode"
+  - "cldr-emoji-annotation"
+  - "cldr-emoji-annotation-dtd"
+  - "default-fonts-cjk-mono"
+  - "default-fonts-cjk-sans"
+  - "default-fonts-cjk-serif"
+  - "glibc-all-langpacks"
+  - "google-noto-sans-cjk-vf-fonts"
+  - "google-noto-sans-mono-cjk-vf-fonts"
+  - "google-noto-serif-cjk-vf-fonts"
+  - "ibus-anthy"
+  - "ibus-anthy-python"
+  - "ibus-chewing"
+  - "ibus-hangul"
+  - "ibus-libpinyin"
+  - "ibus-m17n"
+  - "ibus-typing-booster"
+  - "kasumi-unicode"
+  - "libchewing"
+  - "libhangul"
+  - "libpinyin"
+  - "libpinyin-data"
+  - "m17n-db"
+  - "m17n-lib"
+  - "unicode-ucd"
+
+  # Accessibility applications and speech/Braille data are unused. Keep flite
+  # for GNOME's WebKit dependency and brlapi for QEMU's Braille chardev module.
+  - "braille-printer-app"
+  - "brltty"
+  - "espeak-ng"
+  - "liblouis"
+  - "liblouis-tables"
+  - "liblouisutdml"
+  - "liblouisutdml-utils"
+  - "orca"
+  - "python3-brlapi"
+  - "python3-louis"
+  - "python3-speechd"
+  - "speech-dispatcher"
+  - "speech-dispatcher-espeak-ng"
+  - "speech-dispatcher-libs"
+  - "speech-dispatcher-utils"
+
+  # WireGuard remains in NetworkManager; PPP and other VPN clients are outside
+  # this host's network profile. Fedora's Bluetooth networking plugin requires
+  # NetworkManager-wwan, ModemManager, and the MBIM/QMI libraries, so that
+  # dependency chain remains to preserve complete Bluetooth functionality.
+  - "NetworkManager-adsl"
+  - "NetworkManager-openconnect"
+  - "NetworkManager-openconnect-gnome"
+  - "NetworkManager-openvpn"
+  - "NetworkManager-openvpn-gnome"
+  - "NetworkManager-ppp"
+  - "NetworkManager-ssh"
+  - "NetworkManager-ssh-gnome"
+  - "NetworkManager-ssh-selinux"
+  - "NetworkManager-vpnc"
+  - "NetworkManager-vpnc-gnome"
+  - "openconnect"
+  - "openvpn"
+  - "ppp"
+  - "usb_modeswitch"
+  - "usb_modeswitch-data"
+  - "vpnc"
+  - "vpnc-script"
+
+  # This is a bare-metal KVM host, not a VM guest or an inbound remote host.
+  - "gnome-remote-desktop"
+  - "hyperv-daemons"
+  - "hyperv-daemons-license"
+  - "hypervfcopyd"
+  - "hypervkvpd"
+  - "hypervvssd"
+  - "open-vm-tools"
+  - "open-vm-tools-desktop"
+  - "openssh-server"
+  - "qemu-guest-agent"
+  - "spice-vdagent"
+  - "virtualbox-guest-additions"
+
+  # SMB client support remains; unused WebDAV serving and enterprise identity
+  # services do not.
+  - "apr"
+  - "apr-util"
+  - "apr-util-lmdb"
+  - "apr-util-openssl"
+  - "gnome-user-share"
+  - "httpd"
+  - "httpd-core"
+  - "httpd-filesystem"
+  - "httpd-tools"
+  - "libsss_certmap"
+  - "libsss_idmap"
+  - "libsss_nss_idmap"
+  - "libsss_sudo"
+  - "mod_dnssd"
+  - "mod_http2"
+  - "mod_lua"
+  - "sssd-client"
+  - "sssd-common"
+  - "sssd-kcm"
+  - "sssd-krb5-common"
+  - "sssd-nfs-idmap"
+
+  # Nonessential local documentation and stock artwork.
+  - "desktop-backgrounds-gnome"
+  - "f44-backgrounds-base"
+  - "f44-backgrounds-gnome"
+  - "fedora-workstation-backgrounds"
+  - "gnome-backgrounds"
+  - "gnome-user-docs"
+
+# The current applications are system-wide Flatpaks. Leave them untouched while
+# this profile remains scoped to per-user Flatpak state.
+silverblue_flatpak_remotes: []
+silverblue_flatpaks: []
+# Example:
+# silverblue_flatpaks:
+#   - name: "org.gnome.Calculator"
+#     remote: "flathub"
+#     state: "present"

@@ -1,0 +1,19 @@
+---
+- name: "Validate Silverblue configuration"
+  ansible.builtin.import_tasks: "validate.yml"
+
+- name: "Reconcile RPM repositories"
+  ansible.builtin.import_tasks: "repositories.yml"
+
+- name: "Reconcile rpm-ostree state"
+  ansible.builtin.import_tasks: "rpm-ostree.yml"
+
+- name: "Reconcile pinned host tools"
+  ansible.builtin.import_tasks: "tools.yml"
+
+- name: "Reconcile workstation hardening"
+  ansible.builtin.import_tasks: "hardening.yml"
+  when: "silverblue_hardening_enabled"
+
+- name: "Reconcile Flatpak state"
+  ansible.builtin.import_tasks: "flatpak.yml"

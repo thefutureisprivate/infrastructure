@@ -1,0 +1,17 @@
+# Managed by Ansible. NTS-authenticated sources are preferred; the IP source is a bootstrap fallback.
+server 129.6.15.27 iburst
+{% for server in silverblue_chrony_nts_servers %}
+server {{ server }} iburst nts
+{% endfor %}
+
+minsources 3
+authselectmode prefer
+driftfile /var/lib/chrony/drift
+dumpdir /var/lib/chrony
+ntsdumpdir /var/lib/chrony
+leapseclist /usr/share/zoneinfo/leap-seconds.list
+makestep 1.0 3
+rtconutc
+rtcsync
+cmdport 0
+noclientlog

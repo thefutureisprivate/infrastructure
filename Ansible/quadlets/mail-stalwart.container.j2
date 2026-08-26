@@ -30,6 +30,12 @@ PublishPort=127.0.0.1:8080:8080
 ReadOnly=true
 RunInit=true
 Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=128m,mode=1777
+HealthCmd=curl -fsSk -H "X-Forwarded-For: 127.0.0.1" https://127.0.0.1:443/healthz/live || curl -fsS -H "X-Forwarded-For: 127.0.0.1" http://127.0.0.1:8080/healthz/live
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=60s
+HealthOnFailure=kill
 
 [Service]
 Restart=always

@@ -531,6 +531,27 @@ write_generated_vars() {
     "${generated_vars_file}"
 }
 
+desec_api_request() {
+  local method=$1 api_path=$2 response_mode=${3:-body}
+  if [[ ${method} != GET && ${method} != DELETE ]] || \
+    [[ ${response_mode} != body && ${response_mode} != status ]]; then
+    printf 'Unsupported deSEC API request mode.\n' >&2
+    return 2
+  fi
+  SOPS_SECRETS_FILE="${sops_infrastructure_path}" \
+    "${repo_root}/SOPS/exec-env.sh" --allow DESEC_API_TOKEN -- \
+    bash -o pipefail -c '
+      curl_args=(--silent --show-error --request "$1" --config -)
+      if [[ $3 == status ]]; then
+        curl_args+=(--output /dev/null --write-out "%{http_code}")
+      else
+        curl_args+=(--fail)
+      fi
+      printf "%s\n" "header = \"Authorization: Token ${DESEC_API_TOKEN}\"" |
+        env -u DESEC_API_TOKEN curl "${curl_args[@]}" "$2"
+    ' bash "${method}" "https://desec.io/api/v1/${api_path}" "${response_mode}"
+}
+
 apply_opentofu_dns_boundary() {
   tofu_plan="${tf_path}/stalwart-bootstrap.tfplan"
   rm -f -- "${tofu_plan}"
@@ -557,6 +578,10 @@ select_acme_caa_account() {
   write_generated_vars "${account_uri}"
   apply_opentofu_dns_boundary
 }
+
+bootstrap_stage='legacy autoconfiguration DNS retirement'
+desec_api_request DELETE \
+  "domains/${stalwart_domain}/rrsets/autoconfig/CNAME/"
 
 bootstrap_stage='exact DKIM, CAA, and reporting deSEC policy'
 if [[ ${first_rollout} != true ]]; then
@@ -751,31 +776,23 @@ fi
 bootstrap_stage='public enforcing MTA-STS policy audit'
 wait_for_enforcing_mta_sts_policy
 
-desec_api_get() {
-  local api_path=$1
-  SOPS_SECRETS_FILE="${sops_infrastructure_path}" \
-    "${repo_root}/SOPS/exec-env.sh" --allow DESEC_API_TOKEN -- \
-    bash -o pipefail -c '
-      printf "%s\n" "header = \"Authorization: Token ${DESEC_API_TOKEN}\"" |
-        env -u DESEC_API_TOKEN curl --silent --show-error --fail \
-          --config - "$1"
-    ' bash "https://desec.io/api/v1/${api_path}"
-}
-
 mail_policy_matches() {
   local apex_rrset dmarc_rrset domain_metadata mail_rrset mta_sts_rrset
-  local published tls_reporting_rrset
-  domain_metadata=$(desec_api_get "domains/${stalwart_domain}/") || return 1
-  apex_rrset=$(desec_api_get \
+  local legacy_autoconfig_status published tls_reporting_rrset
+  domain_metadata=$(desec_api_request GET "domains/${stalwart_domain}/") || return 1
+  apex_rrset=$(desec_api_request GET \
     "domains/${stalwart_domain}/rrsets/@/CAA/") || return 1
-  mail_rrset=$(desec_api_get \
+  mail_rrset=$(desec_api_request GET \
     "domains/${stalwart_domain}/rrsets/mail/CAA/") || return 1
-  mta_sts_rrset=$(desec_api_get \
+  mta_sts_rrset=$(desec_api_request GET \
     "domains/${stalwart_domain}/rrsets/mta-sts/CNAME/") || return 1
-  dmarc_rrset=$(desec_api_get \
+  dmarc_rrset=$(desec_api_request GET \
     "domains/${stalwart_domain}/rrsets/_dmarc/TXT/") || return 1
-  tls_reporting_rrset=$(desec_api_get \
+  tls_reporting_rrset=$(desec_api_request GET \
     "domains/${stalwart_domain}/rrsets/_smtp._tls/TXT/") || return 1
+  legacy_autoconfig_status=$(desec_api_request GET \
+    "domains/${stalwart_domain}/rrsets/autoconfig/CNAME/" status) || return 1
+  [[ ${legacy_autoconfig_status} == 404 ]] || return 1
   published=$(jq -er '.published | select(type == "string")' \
     <<<"${domain_metadata}") || return 1
 
@@ -877,6 +894,7 @@ capture_cli query Domain \
       and .dnsManagement.publishRecords.caa == false
       and .dnsManagement.publishRecords.dmarc == false
       and .dnsManagement.publishRecords.tlsRpt == false
+      and .dnsManagement.publishRecords.autoConfigLegacy == false
       and .dnsManagement.publishRecords.dkim == true
       and .dnsManagement.publishRecords.tlsa == true
       and .reportAddressUri == null

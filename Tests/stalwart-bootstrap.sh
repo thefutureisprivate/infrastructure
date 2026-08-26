@@ -95,6 +95,7 @@ for specification in \
     and .[2].value.primary.dnsManagement.publishRecords.caa == false
     and .[2].value.primary.dnsManagement.publishRecords.dmarc == false
     and .[2].value.primary.dnsManagement.publishRecords.tlsRpt == false
+    and .[2].value.primary.dnsManagement.publishRecords.autoConfigLegacy == false
     and .[2].value.primary.dnsManagement.publishRecords.tlsa == true
     and .[2].value.primary.reportAddressUri == null
   ' "${plan}" >/dev/null
@@ -128,6 +129,11 @@ if grep -Eq '^[[:space:]]*(dmarc|tls_reporting)[[:space:]]*=' \
   printf 'The Stalwart child token must not retain DMARC or TLS-RPT write authority.\n' >&2
   exit 1
 fi
+if grep -Eq '^[[:space:]]*legacy_autoconfig[[:space:]]*=' \
+  "${repo_root}/OpenTofu/dns.tf"; then
+  printf 'The Stalwart child token must not retain legacy autoconfiguration write authority.\n' >&2
+  exit 1
+fi
 grep -Fq -- 'mailto:caa@thefutureisprivate.dev' "${repo_root}/OpenTofu/dns.tf"
 grep -Fq -- 'mailto:dmarc@thefutureisprivate.dev' "${repo_root}/OpenTofu/zone.tf"
 grep -Fq -- 'mailto:tls-rpt@thefutureisprivate.dev' "${repo_root}/OpenTofu/zone.tf"
@@ -159,9 +165,17 @@ grep -Fq -- 'production_certificate_is_valid -4' "${repo_root}/Scripts/stalwart-
 grep -Fq -- 'production_certificate_is_valid -6' "${repo_root}/Scripts/stalwart-bootstrap.sh"
 grep -Fq -- 'wait_for_enforcing_mta_sts_policy' "${repo_root}/Scripts/stalwart-bootstrap.sh"
 grep -Fq -- 'wait_for_mail_policy' "${repo_root}/Scripts/stalwart-bootstrap.sh"
-grep -Fq -- 'desec_api_get' "${repo_root}/Scripts/stalwart-bootstrap.sh"
+grep -Fq -- 'desec_api_request' "${repo_root}/Scripts/stalwart-bootstrap.sh"
+grep -Fq -- 'desec_api_request DELETE' \
+  "${repo_root}/Scripts/stalwart-bootstrap.sh"
+grep -Fq -- 'rrsets/autoconfig/CNAME/' \
+  "${repo_root}/Scripts/stalwart-bootstrap.sh"
+grep -Fq -- 'curl_args=(--silent --show-error --request "$1" --config -)' \
+  "${repo_root}/Scripts/stalwart-bootstrap.sh"
 grep -Fq -- '.touched <= $published' "${repo_root}/Scripts/stalwart-bootstrap.sh"
 grep -Fq -- 'env -u DESEC_API_TOKEN curl' \
+  "${repo_root}/Scripts/stalwart-bootstrap.sh"
+grep -Fq -- '.dnsManagement.publishRecords.autoConfigLegacy == false' \
   "${repo_root}/Scripts/stalwart-bootstrap.sh"
 grep -Fq -- 'mta_sts_policy_is_enforcing -4' "${repo_root}/Scripts/stalwart-bootstrap.sh"
 grep -Fq -- 'mta_sts_policy_is_enforcing -6' "${repo_root}/Scripts/stalwart-bootstrap.sh"
@@ -220,5 +234,17 @@ grep -Fq -- 'STALWART_BOOTSTRAP_SECRET_NAME must name the temporary server-side 
 grep -Fq -- 'Environment=STALWART_HOSTNAME={{ inventory_hostname }}' \
   "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
 grep -Fq -- 'HostName={{ inventory_hostname }}' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'HealthCmd=curl -fsSk -H "X-Forwarded-For: 127.0.0.1" https://127.0.0.1:443/healthz/live || curl -fsS -H "X-Forwarded-For: 127.0.0.1" http://127.0.0.1:8080/healthz/live' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'HealthInterval=30s' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'HealthTimeout=5s' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'HealthRetries=3' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'HealthStartPeriod=60s' \
+  "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
+grep -Fq -- 'HealthOnFailure=kill' \
   "${repo_root}/Ansible/quadlets/mail-stalwart.container.j2"
 printf 'Stalwart automated bootstrap policy: OK\n'

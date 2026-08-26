@@ -1,0 +1,12 @@
+# Managed by Ansible. Local changes will be overwritten.
+[opentofu]
+name=OpenTofu upstream
+baseurl={{ silverblue_opentofu_repository.baseurl }}
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=file://{{ silverblue_opentofu_repository.release_key.path }}
+       file://{{ silverblue_opentofu_repository.repository_key.path }}
+sslverify=1
+metadata_expire=300
+skip_if_unavailable=0

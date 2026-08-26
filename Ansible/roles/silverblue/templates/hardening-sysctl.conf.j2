@@ -1,0 +1,4 @@
+# Managed by Ansible. Local edits will be replaced.
+{% for setting in silverblue_sysctl_settings | dict2items | sort(attribute='key') %}
+{{ setting.key }} = {{ setting.value }}
+{% endfor %}

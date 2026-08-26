@@ -1,0 +1,19 @@
+---
+- name: "Create the host-local binary directory"
+  ansible.builtin.file:
+    path: "{{ silverblue_sops.path | dirname }}"
+    state: "directory"
+    owner: "root"
+    group: "root"
+    mode: "0755"
+  become: true
+
+- name: "Install the checksum-pinned SOPS binary"
+  ansible.builtin.get_url:
+    url: "{{ silverblue_sops.url }}"
+    dest: "{{ silverblue_sops.path }}"
+    checksum: "sha256:{{ silverblue_sops.sha256 }}"
+    owner: "root"
+    group: "root"
+    mode: "0755"
+  become: true

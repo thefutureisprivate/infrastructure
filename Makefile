@@ -15,7 +15,7 @@ TF_VAR_ARGS = -var-file="$(TF_VARS)" $(if $(wildcard $(TF_DIR)/$(STALWART_DKIM_V
 
 .DEFAULT_GOAL := help
 
-.PHONY: help sops-infrastructure-init sops-infrastructure-edit sops-mail-init sops-mail-edit sops-mail-sync-desec ignition install tofu-fmt tofu-init tofu-validate plan apply inventory base-deploy deploy-bootstrap deploy stalwart-bootstrap stalwart-webui-bootstrap stalwart-harden stalwart-audit check clean
+.PHONY: help sops-infrastructure-init sops-infrastructure-edit sops-mail-init sops-mail-edit sops-mail-sync-desec ignition install tofu-fmt tofu-init tofu-validate plan apply inventory base-deploy deploy-bootstrap deploy stalwart-bootstrap stalwart-webui-bootstrap stalwart-harden stalwart-audit silverblue-check silverblue-apply check clean
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -105,6 +105,16 @@ stalwart-harden: ## Idempotently apply the production Stalwart hardening plan
 stalwart-audit: ## Audit Stalwart configuration, security headers, and implicit TLS
 	@SOPS_SECRETS_FILE="$(SOPS_MAIL_FILE)" bash SOPS/exec-env.sh \
 		--allow STALWART_CONFIG_API_TOKEN -- ./Scripts/stalwart-hardening.sh audit
+
+silverblue-check: ## Preview local Silverblue reconciliation
+	@env ANSIBLE_CONFIG="$(ANSIBLE_DIR)/ansible.cfg" \
+		$(ANSIBLE_PLAYBOOK) -i "$(ANSIBLE_DIR)/inventory/silverblue.yml" \
+		"$(ANSIBLE_DIR)/playbooks/silverblue.yml" --check --diff --ask-become-pass
+
+silverblue-apply: ## Reconcile the local Silverblue workstation
+	@env ANSIBLE_CONFIG="$(ANSIBLE_DIR)/ansible.cfg" \
+		$(ANSIBLE_PLAYBOOK) -i "$(ANSIBLE_DIR)/inventory/silverblue.yml" \
+		"$(ANSIBLE_DIR)/playbooks/silverblue.yml" --diff --ask-become-pass
 
 check: ## Run all locally available static checks
 	@./Scripts/check.sh

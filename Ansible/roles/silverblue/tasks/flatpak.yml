@@ -1,0 +1,190 @@
+---
+- name: "Inspect user Flatpak remote names"
+  ansible.builtin.command:
+    argv:
+      - "flatpak"
+      - "remotes"
+      - "--user"
+      - "--columns=name"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_current_flatpak_remotes"
+
+- name: "Preview user Flatpak remotes to add"
+  ansible.builtin.debug:
+    msg: "The user Flatpak installation would add remote: {{ item.name }}"
+  changed_when: true
+  loop: "{{ silverblue_flatpak_remotes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "ansible_check_mode"
+    - "item.state | default('present') == 'present'"
+    - "item.name not in silverblue_current_flatpak_remotes.stdout_lines"
+
+- name: "Add declared user Flatpak remotes"
+  ansible.builtin.command:
+    argv:
+      - "flatpak"
+      - "remote-add"
+      - "--user"
+      - "{{ item.name }}"
+      - "{{ item.flatpakrepo_url }}"
+  changed_when: true
+  loop: "{{ silverblue_flatpak_remotes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "not ansible_check_mode"
+    - "item.state | default('present') == 'present'"
+    - "item.name not in silverblue_current_flatpak_remotes.stdout_lines"
+
+- name: "Inspect effective user Flatpak remotes"
+  ansible.builtin.command:
+    argv:
+      - "flatpak"
+      - "remotes"
+      - "--user"
+      - "--columns=name,url"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_effective_flatpak_remotes"
+
+- name: "Verify existing Flatpak remote sources"
+  ansible.builtin.assert:
+    that:
+      - 'item.name ~ "\t" ~ item.expected_url in silverblue_effective_flatpak_remotes.stdout_lines'
+    fail_msg: >-
+      Flatpak remote {{ item.name }} does not use {{ item.expected_url }}.
+      Remove it manually and rerun the playbook to re-establish the trust root.
+  loop: "{{ silverblue_flatpak_remotes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "item.state | default('present') == 'present'"
+    - "not ansible_check_mode or item.name in silverblue_current_flatpak_remotes.stdout_lines"
+
+- name: "Inspect installed user Flatpak names"
+  ansible.builtin.command:
+    argv:
+      - "flatpak"
+      - "list"
+      - "--user"
+      - "--app"
+      - "--columns=application"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_current_flatpaks"
+
+- name: "Inspect installed user Flatpak sources"
+  ansible.builtin.command:
+    argv:
+      - "flatpak"
+      - "list"
+      - "--user"
+      - "--app"
+      - "--columns=application,origin"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_current_flatpak_sources"
+
+- name: "Verify existing Flatpak application sources"
+  ansible.builtin.assert:
+    that:
+      - 'item.name ~ "\t" ~ item.remote in silverblue_current_flatpak_sources.stdout_lines'
+    fail_msg: >-
+      Flatpak {{ item.name }} is not installed from {{ item.remote }}.
+      Declare it absent, reconcile, then declare the new source.
+  loop: "{{ silverblue_flatpaks }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "item.state | default('present') == 'present'"
+    - "item.name in silverblue_current_flatpaks.stdout_lines"
+
+- name: "Preview user Flatpaks to install"
+  ansible.builtin.debug:
+    msg: "The user Flatpak installation would install {{ item.name }} from {{ item.remote }}."
+  changed_when: true
+  loop: "{{ silverblue_flatpaks }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "ansible_check_mode"
+    - "item.state | default('present') == 'present'"
+    - "item.name not in silverblue_current_flatpaks.stdout_lines"
+
+- name: "Install declared user Flatpaks"
+  ansible.builtin.command:
+    argv:
+      - "flatpak"
+      - "install"
+      - "--user"
+      - "--noninteractive"
+      - "{{ item.remote }}"
+      - "{{ item.name }}"
+  changed_when: true
+  loop: "{{ silverblue_flatpaks }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "not ansible_check_mode"
+    - "item.state | default('present') == 'present'"
+    - "item.name not in silverblue_current_flatpaks.stdout_lines"
+
+- name: "Preview user Flatpaks to remove"
+  ansible.builtin.debug:
+    msg: "The user Flatpak installation would remove {{ item.name }}."
+  changed_when: true
+  loop: "{{ silverblue_flatpaks }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "ansible_check_mode"
+    - "item.state | default('present') == 'absent'"
+    - "item.name in silverblue_current_flatpaks.stdout_lines"
+
+- name: "Remove explicitly absent user Flatpaks"
+  ansible.builtin.command:
+    argv:
+      - "flatpak"
+      - "uninstall"
+      - "--user"
+      - "--noninteractive"
+      - "{{ item.name }}"
+  changed_when: true
+  loop: "{{ silverblue_flatpaks }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "not ansible_check_mode"
+    - "item.state | default('present') == 'absent'"
+    - "item.name in silverblue_current_flatpaks.stdout_lines"
+
+- name: "Preview user Flatpak remotes to remove"
+  ansible.builtin.debug:
+    msg: "The user Flatpak installation would remove remote: {{ item.name }}"
+  changed_when: true
+  loop: "{{ silverblue_flatpak_remotes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "ansible_check_mode"
+    - "item.state | default('present') == 'absent'"
+    - "item.name in silverblue_current_flatpak_remotes.stdout_lines"
+
+- name: "Remove explicitly absent user Flatpak remotes"
+  ansible.builtin.command:
+    argv:
+      - "flatpak"
+      - "remote-delete"
+      - "--user"
+      - "{{ item.name }}"
+  changed_when: true
+  loop: "{{ silverblue_flatpak_remotes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - "not ansible_check_mode"
+    - "item.state | default('present') == 'absent'"
+    - "item.name in silverblue_current_flatpak_remotes.stdout_lines"

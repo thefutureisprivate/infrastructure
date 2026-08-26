@@ -169,13 +169,27 @@ expected_listeners=$(jq -cS -s '
   map(select(."@type" == "reconcile" and .object == "NetworkListener"))[0]
     .value | [.[] | managed] | sort_by(.name)
 ' "${plan_file}")
-expected_inbound_throttle=$(jq -cS -s '
+expected_inbound_throttles=$(jq -cS -s '
   map(select(."@type" == "upsert" and .object == "MtaInboundThrottle"))[0]
-    .value | to_entries[0].value
-    | {enable, description, key, match, rate}
+    .value | [.[] | {enable, description, key, match, rate}]
+    | sort_by(.description)
+' "${plan_file}")
+expected_queue_quotas=$(jq -cS -s '
+  map(select(."@type" == "upsert" and .object == "MtaQueueQuota"))[0]
+    .value | [.[] | {enable, description, key, match, messages, size}]
+    | sort_by(.description)
 ' "${plan_file}")
 expected_http=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "Http"))[0].value
+' "${plan_file}")
+expected_imap=$(jq -cS -s '
+  map(select(."@type" == "update" and .object == "Imap"))[0].value
+' "${plan_file}")
+expected_jmap=$(jq -cS -s '
+  map(select(."@type" == "update" and .object == "Jmap"))[0].value
+' "${plan_file}")
+expected_authentication=$(jq -cS -s '
+  map(select(."@type" == "update" and .object == "Authentication"))[0].value
 ' "${plan_file}")
 expected_webdav=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "WebDav"))[0].value
@@ -199,8 +213,12 @@ expected_applications=$(jq -cS -s '
 ' "${plan_file}")
 
 actual_listeners=''
-actual_inbound_throttle=''
+actual_inbound_throttles=''
+actual_queue_quotas=''
 actual_http=''
+actual_imap=''
+actual_jmap=''
+actual_authentication=''
 actual_webdav=''
 actual_auth=''
 actual_mail=''
@@ -208,7 +226,7 @@ actual_mta_sts=''
 actual_applications=''
 
 read_actual_configuration() {
-  local listener_ndjson inbound_throttle_ndjson http_json webdav_json auth_json mail_json mta_sts_json application_ndjson
+  local listener_ndjson inbound_throttle_ndjson queue_quota_ndjson http_json imap_json jmap_json authentication_json webdav_json auth_json mail_json mta_sts_json application_ndjson
 
   listener_ndjson=$(run_cli query NetworkListener \
     --fields name,bind,protocol,overrideProxyTrustedNetworks,useTls,tlsDisableCipherSuites,tlsDisableProtocols,tlsIgnoreClientOrder,tlsImplicit,tlsTimeout,maxConnections \
@@ -216,8 +234,20 @@ read_actual_configuration() {
   inbound_throttle_ndjson=$(run_cli query MtaInboundThrottle \
     --fields enable,description,key,match,rate \
     --json) || return 1
+  queue_quota_ndjson=$(run_cli query MtaQueueQuota \
+    --fields enable,description,key,match,messages,size \
+    --json) || return 1
   http_json=$(run_cli get Http --fields \
     rateLimitAuthenticated,rateLimitAnonymous,enableHsts,usePermissiveCors,responseHeaders,useXForwarded,redirectRoot \
+    --json) || return 1
+  imap_json=$(run_cli get Imap --fields \
+    maxConcurrent,maxRequestRate,maxRequestSize \
+    --json) || return 1
+  jmap_json=$(run_cli get Jmap --fields \
+    maxConcurrentRequests,maxRequestSize,maxMethodCalls \
+    --json) || return 1
+  authentication_json=$(run_cli get Authentication --fields \
+    passwordHashAlgorithm,passwordMinLength,passwordMinStrength,maxApiKeys,maxAppPasswords \
     --json) || return 1
   webdav_json=$(run_cli get WebDav --fields \
     enableAssistedDiscovery,maxLockTimeout,maxLocks,deadPropertyMaxSize,livePropertyMaxSize,requestMaxSize,maxResults \
@@ -243,17 +273,42 @@ read_actual_configuration() {
     };
     [.[] | managed] | sort_by(.name)
   ' <<<"${listener_ndjson}")
-  actual_inbound_throttle=$(jq -cS -s '
+  actual_inbound_throttles=$(jq -cS -s \
+    --argjson expected "${expected_inbound_throttles}" '
     def normalize_conditionals:
       walk(if type == "object" and .match? == {} then del(.match) else . end);
-    map(select(.description == "Sender IP throttle"))
-    | if length == 1 then .[0] | {enable, description, key, match, rate} else . end
+    ($expected | map(.description)) as $owned_descriptions
+    | [.[]
+      | select(.description as $description | $owned_descriptions | index($description))
+      | {enable, description, key, match, rate}]
+    | sort_by(.description)
     | normalize_conditionals
   ' <<<"${inbound_throttle_ndjson}")
+  actual_queue_quotas=$(jq -cS -s \
+    --argjson expected "${expected_queue_quotas}" '
+    def normalize_conditionals:
+      walk(if type == "object" and .match? == {} then del(.match) else . end);
+    ($expected | map(.description)) as $owned_descriptions
+    | [.[]
+      | select(.description as $description | $owned_descriptions | index($description))
+      | {enable, description, key, match, messages, size}]
+    | sort_by(.description)
+    | normalize_conditionals
+  ' <<<"${queue_quota_ndjson}")
   actual_http=$(jq -cS '{
     rateLimitAuthenticated, rateLimitAnonymous, enableHsts,
     usePermissiveCors, responseHeaders, useXForwarded, redirectRoot
   }' <<<"${http_json}")
+  actual_imap=$(jq -cS '{
+    maxConcurrent, maxRequestRate, maxRequestSize
+  }' <<<"${imap_json}")
+  actual_jmap=$(jq -cS '{
+    maxConcurrentRequests, maxRequestSize, maxMethodCalls
+  }' <<<"${jmap_json}")
+  actual_authentication=$(jq -cS '{
+    passwordHashAlgorithm, passwordMinLength, passwordMinStrength,
+    maxApiKeys, maxAppPasswords
+  }' <<<"${authentication_json}")
   actual_webdav=$(jq -cS '{
     enableAssistedDiscovery, maxLockTimeout, maxLocks, deadPropertyMaxSize,
     livePropertyMaxSize, requestMaxSize, maxResults
@@ -280,8 +335,12 @@ read_actual_configuration() {
 
 configuration_matches() {
   [[ ${actual_listeners} == "${expected_listeners}" ]] &&
-    [[ ${actual_inbound_throttle} == "${expected_inbound_throttle}" ]] &&
+    [[ ${actual_inbound_throttles} == "${expected_inbound_throttles}" ]] &&
+    [[ ${actual_queue_quotas} == "${expected_queue_quotas}" ]] &&
     [[ ${actual_http} == "${expected_http}" ]] &&
+    [[ ${actual_imap} == "${expected_imap}" ]] &&
+    [[ ${actual_jmap} == "${expected_jmap}" ]] &&
+    [[ ${actual_authentication} == "${expected_authentication}" ]] &&
     [[ ${actual_webdav} == "${expected_webdav}" ]] &&
     [[ ${actual_auth} == "${expected_auth}" ]] &&
     [[ ${actual_mail} == "${expected_mail}" ]] &&
@@ -485,8 +544,12 @@ audit() {
   read_actual_configuration
   if ! configuration_matches; then
     show_drift NetworkListener "${expected_listeners}" "${actual_listeners}"
-    show_drift MtaInboundThrottle "${expected_inbound_throttle}" "${actual_inbound_throttle}"
+    show_drift MtaInboundThrottle "${expected_inbound_throttles}" "${actual_inbound_throttles}"
+    show_drift MtaQueueQuota "${expected_queue_quotas}" "${actual_queue_quotas}"
     show_drift Http "${expected_http}" "${actual_http}"
+    show_drift Imap "${expected_imap}" "${actual_imap}"
+    show_drift Jmap "${expected_jmap}" "${actual_jmap}"
+    show_drift Authentication "${expected_authentication}" "${actual_authentication}"
     show_drift WebDav "${expected_webdav}" "${actual_webdav}"
     show_drift MtaStageAuth "${expected_auth}" "${actual_auth}"
     show_drift MtaStageMail "${expected_mail}" "${actual_mail}"

@@ -35,6 +35,39 @@ gVisor is a defense-in-depth boundary against container compromise. It does not
 protect containers from a malicious host administrator or make an untrusted
 container image safe by itself.
 
+## Workstation Controls
+
+The Silverblue profile reduces mutable host state rather than treating the
+operator workstation as another conventional package-managed server. It stages
+rpm-ostree updates for the next user-initiated reboot, layers only explicitly
+declared host-integration and administration packages, and leaves other
+development tools in Toolbx. Automatic reboots are rejected so an update cannot
+interrupt an active deployment or secret-handling operation.
+
+The workstation also applies a compatibility-scoped version of the PrivSec
+desktop hardening baseline. It enforces SELinux, signed modules and kernel
+lockdown, IOMMU isolation, memory and information-leak sysctls, NTS time,
+DNSSEC/opportunistic DNS-over-TLS without LLMNR, randomized link identities,
+PAM faillock, private file-creation defaults, and disabled GNOME media autorun.
+Its firewalld zone drops unsolicited inbound traffic while retaining only the
+discovery client protocols required for printing and scanning. The SSH server
+and Fedora CountMe timer are masked.
+
+Controls that conflict with declared workstation capabilities are explicitly
+excluded: user namespaces and container/VM kernel interfaces remain available;
+Bluetooth and CIFS modules are not denied; strict reverse-path filtering is not
+used with WireGuard/libvirt; and Flatpak permissions are not globally revoked
+without per-application review. Full-disk encryption and Secure Boot are
+reported as audit boundaries because a running Ansible role cannot safely
+establish their installation and firmware trust roots.
+
+Flatpak remotes and applications are installed in the invoking user's scope.
+Repository definitions must use HTTPS, and existing remotes and applications
+must match their declared effective source. A mismatch stops reconciliation;
+the operator must explicitly remove the old state before establishing a new
+trust root. Undeclared package layers and Flatpaks are not pruned, so adopting
+the profile cannot silently remove local software.
+
 ## Host Controls
 
 The same mail-independent Ignition applies to every declared FCOS node. It
@@ -164,7 +197,10 @@ no published host port. Stalwart runs as the image's unprivileged UID 2000 and
 retains the image capability needed to bind privileged mail ports. It publishes
 only the services selected in OpenTofu variables. Its bootstrap HTTP publication
 is disabled by default and can be enabled only on host loopback for initial
-setup.
+setup. Both containers expose internal health checks. Stalwart's probe uses the
+upstream liveness endpoint over HTTPS, falls back to the loopback bootstrap
+listener only while it exists, and kills the container after three failures so
+the systemd restart policy can recover it.
 
 ## Stalwart Boundary
 
@@ -345,8 +381,9 @@ image does not currently publish equivalent Sigstore evidence.
   host. Isolation relies on Podman, gVisor, and host integrity.
 - Hetzner backups are not guaranteed to be application-consistent PostgreSQL
   backups.
-- Stalwart listener, HTTP, SMTP-auth, Domain, DNS, DKIM, and certificate setup
-  is declarative; account lifecycle, mailbox policy, deliverability, and
+- Stalwart listener, HTTP, authentication, protocol limits, SMTP throttles,
+  queue quota, SMTP-auth, Domain, DNS, DKIM, and certificate setup is
+  declarative; account lifecycle, mailbox policy, deliverability, and
   reputation controls still require application-level administration.
 - The ignored generated OpenTofu input contains the public ACME account URI and
   must be refreshed by `make stalwart-bootstrap` if an ACME provider is

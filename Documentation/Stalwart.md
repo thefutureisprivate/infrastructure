@@ -112,8 +112,18 @@ Account › Credentials › API Keys. Name it `infrastructure-hardening`, use
 - `sysMtaInboundThrottleCreate`;
 - `sysMtaInboundThrottleUpdate`;
 - `sysMtaInboundThrottleQuery`;
+- `sysMtaQueueQuotaGet`;
+- `sysMtaQueueQuotaCreate`;
+- `sysMtaQueueQuotaUpdate`;
+- `sysMtaQueueQuotaQuery`;
 - `sysHttpGet`;
 - `sysHttpUpdate`;
+- `sysImapGet`;
+- `sysImapUpdate`;
+- `sysJmapGet`;
+- `sysJmapUpdate`;
+- `sysAuthenticationGet`;
+- `sysAuthenticationUpdate`;
 - `sysWebDavGet`;
 - `sysWebDavUpdate`;
 - `sysMtaStageAuthGet`;
@@ -133,8 +143,9 @@ Restrict `allowedIps` to the operator workstation's stable public egress CIDR
 when one is available. The server reveals the API-key secret only once. Store
 it immediately as `STALWART_CONFIG_API_TOKEN` with `make sops-mail-edit`; never
 place it in a shell command, `.env` file, or Quadlet. This key cannot log in to
-mail protocols and has no account, domain, DNS, queue, or secret-management
-permissions beyond the authentication prerequisite.
+mail protocols and has no account, domain, DNS, queued-message, or
+secret-management permissions. Its queue authority is limited to quota
+configuration and cannot inspect, retry, pause, resume, or destroy queued mail.
 
 Apply and verify the plan, then reconcile the production Quadlet:
 
@@ -151,6 +162,30 @@ and can also disrupt bursty, legitimate receiving MTAs. Per-IP throttling,
 listener connection limits, and Stalwart's separate abuse and scanner bans
 remain enabled; no external sender is placed on a permanent allowlist.
 
+Two additional throttles apply to every authenticated submission, including
+implicit-TLS SMTP submission and JMAP `EmailSubmission`. Each account can submit
+at most 100 messages per hour and 500 per day across those paths. A queue quota
+temporarily rejects new queued mail from a sender domain when that domain reaches
+either 5,000 messages or 1 GiB; it never deletes queued mail. Because this
+deployment authorizes senders only from its single hosted domain, the quota
+bounds normal authenticated outbound mail across all accounts. Stalwart 0.16.19
+rejects the documented empty-key encoding for a strictly global queue quota, so
+the plan deliberately uses its supported `senderDomain` grouping instead of a
+non-applicable global declaration. Unauthenticated SMTP federation remains under
+its separate sender-IP throttle.
+
+The authentication singleton explicitly uses Argon2id, requires passwords of at
+least 16 characters with Stalwart's `four` zxcvbn strength, and permits at most
+two API keys and three application passwords per account. Existing credentials
+are not deleted by lowering these creation limits, and existing password hashes
+are not guaranteed to be rewritten by a policy update. Change existing account
+passwords once after applying the plan when their stored hash or strength is not
+already known to comply. IMAP is limited to eight concurrent connections and
+1,000 requests per minute per account, with 50 MiB requests. JMAP permits four
+concurrent requests, 10,000,000-byte request bodies, and 16 method calls per
+request. The HTTP singleton separately retains its authenticated and anonymous
+per-minute request limits.
+
 The apply command first reads the live settings. It performs no mutation when
 they already match, validates the plan before changing drifted settings, and
 audits again afterwards. The audit also checks the live HTTPS headers and
@@ -158,7 +193,10 @@ CalDAV, CardDAV, and WebDAV routes. It requires successful TLS 1.3 handshakes
 and rejected TLS 1.2 handshakes on ports 443, 465, and 993, then verifies that
 SMTP federation on port 25 accepts TLS 1.2 through STARTTLS but rejects a
 plaintext `MAIL FROM`. It also reads back the one permitted Application and
-fails on Web UI resource drift.
+fails on Web UI resource drift. The Stalwart Quadlet probes the upstream
+`/healthz/live` endpoint every 30 seconds over the production HTTPS listener,
+falls back to the loopback-only bootstrap listener during initial setup, and
+lets systemd restart the service after three consecutive failures.
 
 The HTTP policy enables Stalwart's one-year HSTS response, disables permissive
 CORS and forwarded-IP trust, applies authenticated and anonymous request-rate
@@ -218,8 +256,10 @@ The committed declaration configures the `thefutureisprivate.dev` Domain to:
 - select automatic DNS management;
 - select the deSEC provider;
 - set the origin to `thefutureisprivate.dev`;
-- publish `dkim`, `tlsa`, `spf`, `mx`, `srv`, `mtaSts`, `autoConfig`,
-  `autoConfigLegacy`, and `autoDiscover`;
+- publish `dkim`, `tlsa`, `spf`, `mx`, `srv`, `mtaSts`, `autoConfig`, and
+  `autoDiscover`;
+- disable legacy autoconfiguration and delete its stale `autoconfig` CNAME
+  before revoking that owner name from the Stalwart deSEC token;
 - leave native `caa`, `dmarc`, and `tlsRpt` publication disabled because
   OpenTofu owns those policy RRsets and can assign a distinct report address
   to each class;

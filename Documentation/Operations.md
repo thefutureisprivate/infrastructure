@@ -119,6 +119,8 @@ dig -x SERVER_ADDRESS
 `Ansible/compose.yaml` is a dependency lockfile, not the deployment mechanism.
 Dependabot reads it as Docker Compose input and proposes digest-pinned Stalwart
 server, Stalwart CLI, and PostgreSQL updates after a seven-day cooldown.
+The Stalwart server pin deliberately selects the upstream Alpine/musl variant;
+the offline image-policy check rejects a switch back to the default runtime.
 
 For each update:
 

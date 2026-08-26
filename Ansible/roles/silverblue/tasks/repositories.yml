@@ -1,0 +1,39 @@
+---
+- name: "Create the RPM signing-key directory"
+  ansible.builtin.file:
+    path: "/etc/pki/rpm-gpg"
+    state: "directory"
+    owner: "root"
+    group: "root"
+    mode: "0755"
+  become: true
+
+- name: "Install checksum-pinned OpenTofu RPM signing keys"
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ item.path }}"
+    checksum: "sha256:{{ item.sha256 }}"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+  loop:
+    - "{{ silverblue_opentofu_repository.release_key }}"
+    - "{{ silverblue_opentofu_repository.repository_key }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: "Remove the obsolete binary OpenTofu RPM signing key"
+  ansible.builtin.file:
+    path: "/etc/pki/rpm-gpg/RPM-GPG-KEY-opentofu"
+    state: "absent"
+  become: true
+
+- name: "Configure the official OpenTofu RPM repository"
+  ansible.builtin.template:
+    src: "opentofu.repo.j2"
+    dest: "{{ silverblue_opentofu_repository.file }}"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true

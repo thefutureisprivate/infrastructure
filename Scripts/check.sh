@@ -93,6 +93,10 @@ if command -v ansible-playbook >/dev/null 2>&1; then
     -i "${repo_root}/Ansible/inventory/hosts.example.yml" \
     "${repo_root}/Ansible/playbooks/quadlets.yml"
   ANSIBLE_CONFIG="${repo_root}/Ansible/ansible.cfg" \
+    ansible-playbook --syntax-check \
+    -i "${repo_root}/Ansible/inventory/silverblue.yml" \
+    "${repo_root}/Ansible/playbooks/silverblue.yml"
+  ANSIBLE_CONFIG="${repo_root}/Ansible/ansible.cfg" \
     "${repo_root}/Tests/ansible-idempotence.sh"
 else
   printf 'Ansible syntax check: skipped (ansible-playbook not installed)\n'

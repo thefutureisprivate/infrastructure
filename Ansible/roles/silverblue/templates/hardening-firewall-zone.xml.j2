@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone target="DROP">
+  <short>Silverblue workstation</short>
+  <description>Drop unsolicited inbound traffic while retaining explicitly required local discovery clients.</description>
+{% for service in silverblue_firewall_services | sort %}
+  <service name="{{ service }}"/>
+{% endfor %}
+</zone>

@@ -1,0 +1,5 @@
+# Managed by Ansible. These modules are outside this workstation's hardware and protocol scope.
+{% for module in silverblue_blocked_kernel_modules | sort %}
+install {{ module }} /usr/bin/false
+blacklist {{ module }}
+{% endfor %}

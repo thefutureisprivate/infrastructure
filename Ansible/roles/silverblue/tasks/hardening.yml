@@ -1,0 +1,428 @@
+---
+- name: "Calculate CPU-specific kernel hardening"
+  vars:
+    silverblue_processor_description: "{{ ansible_facts.processor | default([]) | join(' ') }}"
+  ansible.builtin.set_fact:
+    silverblue_effective_kernel_arguments: >-
+      {{ (silverblue_kernel_arguments
+          + (silverblue_intel_kernel_arguments
+             if 'GenuineIntel' in silverblue_processor_description
+             else [])
+          + (silverblue_amd_kernel_arguments
+             if 'AuthenticAMD' in silverblue_processor_description
+             else []))
+         | unique
+         | list }}
+
+- name: "Create hardening configuration directories"
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: "directory"
+    owner: "root"
+    group: "root"
+    mode: "{{ item.mode | default('0755') }}"
+  become: true
+  loop:
+    - path: "/etc/NetworkManager/conf.d"
+    - path: "/etc/dconf/db/local.d/locks"
+    - path: "/etc/firewalld/zones"
+      mode: "0750"
+    - path: "/etc/systemd/coredump.conf.d"
+    - path: "/etc/systemd/resolved.conf.d"
+    - path: "/etc/systemd/user.conf.d"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: "Install kernel runtime hardening"
+  ansible.builtin.template:
+    src: "hardening-sysctl.conf.j2"
+    dest: "/etc/sysctl.d/90-silverblue-hardening.conf"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+  notify: "Apply sysctl hardening"
+
+- name: "Block unused kernel modules"
+  ansible.builtin.template:
+    src: "hardening-modprobe.conf.j2"
+    dest: "/etc/modprobe.d/90-silverblue-hardening.conf"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+
+- name: "Configure network identity hardening"
+  ansible.builtin.template:
+    src: "hardening-networkmanager.conf.j2"
+    dest: "/etc/NetworkManager/conf.d/90-silverblue-hardening.conf"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+  notify: "Reload NetworkManager configuration"
+
+- name: "Configure resolver hardening"
+  ansible.builtin.template:
+    src: "hardening-resolved.conf.j2"
+    dest: "/etc/systemd/resolved.conf.d/90-silverblue-hardening.conf"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+  notify: "Restart systemd-resolved"
+
+- name: "Configure authenticated time synchronization"
+  ansible.builtin.template:
+    src: "hardening-chrony.conf.j2"
+    dest: "/etc/chrony.conf"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+  notify: "Restart chronyd"
+
+- name: "Enable the chronyd seccomp filter"
+  ansible.builtin.template:
+    src: "hardening-chronyd.sysconfig.j2"
+    dest: "/etc/sysconfig/chronyd"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+  notify: "Restart chronyd"
+
+- name: "Configure a private interactive-shell umask"
+  ansible.builtin.template:
+    src: "hardening-profile.j2"
+    dest: "/etc/profile.d/90-silverblue-hardening.sh"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+
+- name: "Configure private user-manager defaults"
+  ansible.builtin.template:
+    src: "hardening-user-manager.conf.j2"
+    dest: "/etc/systemd/user.conf.d/90-silverblue-hardening.conf"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+
+- name: "Disable persistent core dumps"
+  ansible.builtin.template:
+    src: "hardening-coredump.conf.j2"
+    dest: "/etc/systemd/coredump.conf.d/90-silverblue-hardening.conf"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+
+- name: "Configure GNOME removable-media hardening"
+  ansible.builtin.template:
+    src: "hardening-dconf.j2"
+    dest: "/etc/dconf/db/local.d/90-silverblue-hardening"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+  notify: "Update system dconf databases"
+
+- name: "Lock GNOME removable-media hardening"
+  ansible.builtin.template:
+    src: "hardening-dconf-locks.j2"
+    dest: "/etc/dconf/db/local.d/locks/90-silverblue-hardening"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+  notify: "Update system dconf databases"
+
+- name: "Set the generic network hostname"
+  ansible.builtin.hostname:
+    name: "{{ silverblue_hostname }}"
+    use: "systemd"
+  become: true
+
+- name: "Read the current SELinux mode"
+  ansible.builtin.command:
+    argv:
+      - "getenforce"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_selinux_mode"
+
+- name: "Require an enabled SELinux policy"
+  ansible.builtin.assert:
+    that:
+      - "silverblue_selinux_mode.stdout in ['Enforcing', 'Permissive']"
+    fail_msg: "SELinux is disabled; re-enable and relabel it before applying this profile."
+
+- name: "Persist SELinux enforcing mode"
+  ansible.builtin.lineinfile:
+    path: "/etc/selinux/config"
+    regexp: "^SELINUX="
+    line: "SELINUX=enforcing"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+
+- name: "Preview enabling SELinux enforcing mode"
+  ansible.builtin.debug:
+    msg: "SELinux would be changed from permissive to enforcing mode."
+  changed_when: true
+  when:
+    - "ansible_check_mode"
+    - "silverblue_selinux_mode.stdout == 'Permissive'"
+
+- name: "Enable SELinux enforcing mode"
+  ansible.builtin.command:
+    argv:
+      - "setenforce"
+      - "1"
+  become: true
+  changed_when: true
+  when:
+    - "not ansible_check_mode"
+    - "silverblue_selinux_mode.stdout == 'Permissive'"
+
+- name: "Inspect the active authselect profile"
+  ansible.builtin.command:
+    argv:
+      - "authselect"
+      - "current"
+      - "--raw"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_authselect_profile"
+
+- name: "Preview enabling PAM login throttling"
+  ansible.builtin.debug:
+    msg: "The existing authselect profile would retain its features and add with-faillock."
+  changed_when: true
+  when:
+    - "ansible_check_mode"
+    - "'with-faillock' not in silverblue_authselect_profile.stdout.split()"
+
+- name: "Enable PAM login throttling"
+  ansible.builtin.command:
+    argv:
+      - "authselect"
+      - "enable-feature"
+      - "with-faillock"
+  become: true
+  changed_when: true
+  when:
+    - "not ansible_check_mode"
+    - "'with-faillock' not in silverblue_authselect_profile.stdout.split()"
+
+- name: "Configure PAM login throttling"
+  ansible.builtin.template:
+    src: "hardening-faillock.conf.j2"
+    dest: "/etc/security/faillock.conf"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+
+- name: "Validate the authselect configuration"
+  ansible.builtin.command:
+    argv:
+      - "authselect"
+      - "check"
+  check_mode: false
+  changed_when: false
+
+- name: "Keep time, firewall, and resolver services active"
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: "started"
+  become: true
+  loop:
+    - "chronyd.service"
+    - "firewalld.service"
+    - "systemd-resolved.service"
+
+- name: "Inspect the firmware-refresh timer"
+  ansible.builtin.stat:
+    path: "/usr/lib/systemd/system/fwupd-refresh.timer"
+  register: "silverblue_fwupd_refresh_timer"
+
+- name: "Keep automatic firmware metadata refresh active"
+  ansible.builtin.systemd_service:
+    name: "fwupd-refresh.timer"
+    enabled: true
+    state: "started"
+  become: true
+  when: "silverblue_fwupd_refresh_timer.stat.exists"
+
+- name: "Report unavailable automatic firmware refresh"
+  ansible.builtin.debug:
+    msg: >-
+      fwupd-refresh.timer is not installed. Firmware updates must be checked
+      manually or the Fedora fwupd package must be restored.
+  when: "not silverblue_fwupd_refresh_timer.stat.exists"
+
+- name: "Preview masked tracking and inbound-access units"
+  ansible.builtin.debug:
+    msg: "The unit would be stopped and masked: {{ item }}"
+  changed_when: true
+  loop: "{{ silverblue_masked_units }}"
+  when: "ansible_check_mode"
+
+- name: "Mask tracking and inbound-access units"
+  ansible.builtin.command:
+    argv:
+      - "systemctl"
+      - "mask"
+      - "--force"
+      - "--now"
+      - "{{ item }}"
+  become: true
+  register: "silverblue_mask_unit"
+  changed_when: >-
+    'Created symlink' in (silverblue_mask_unit.stdout + silverblue_mask_unit.stderr)
+    or 'Removed' in (silverblue_mask_unit.stdout + silverblue_mask_unit.stderr)
+  loop: "{{ silverblue_masked_units }}"
+  when: "not ansible_check_mode"
+
+- name: "Install the restrictive workstation firewall zone"
+  ansible.builtin.template:
+    src: "hardening-firewall-zone.xml.j2"
+    dest: "/etc/firewalld/zones/{{ silverblue_firewall_zone }}.xml"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+  notify: "Reload firewalld"
+
+- name: "Load the managed firewall zone"
+  ansible.builtin.meta: "flush_handlers"
+
+- name: "Inspect the default firewall zone"
+  ansible.builtin.command:
+    argv:
+      - "firewall-cmd"
+      - "--get-default-zone"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_default_firewall_zone"
+
+- name: "Preview selecting the restrictive firewall zone"
+  ansible.builtin.debug:
+    msg: "The firewalld default zone would change to {{ silverblue_firewall_zone }}."
+  changed_when: true
+  when:
+    - "ansible_check_mode"
+    - "silverblue_default_firewall_zone.stdout != silverblue_firewall_zone"
+
+- name: "Select the restrictive firewall zone"
+  ansible.builtin.command:
+    argv:
+      - "firewall-cmd"
+      - "--set-default-zone={{ silverblue_firewall_zone }}"
+  become: true
+  changed_when: true
+  when:
+    - "not ansible_check_mode"
+    - "silverblue_default_firewall_zone.stdout != silverblue_firewall_zone"
+
+- name: "Inspect the default deployment kernel arguments"
+  ansible.builtin.command:
+    argv:
+      - "rpm-ostree"
+      - "kargs"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_kernel_arguments_result"
+
+- name: "Calculate missing kernel hardening arguments"
+  ansible.builtin.set_fact:
+    silverblue_kernel_arguments_to_add: >-
+      {{ silverblue_effective_kernel_arguments
+         | difference(silverblue_kernel_arguments_result.stdout.split()) }}
+
+- name: "Preview kernel hardening arguments"
+  ansible.builtin.debug:
+    msg: >-
+      A new deployment would add kernel arguments:
+      {{ silverblue_kernel_arguments_to_add | join(' ') }}.
+  changed_when: true
+  when:
+    - "ansible_check_mode"
+    - "silverblue_kernel_arguments_to_add | length > 0"
+
+- name: "Add kernel hardening arguments"
+  ansible.builtin.command:
+    argv: >-
+      {{ ['rpm-ostree', 'kargs']
+         + (silverblue_kernel_arguments_to_add
+            | map('regex_replace', '^', '--append=')
+            | list) }}
+  become: true
+  changed_when: true
+  when:
+    - "not ansible_check_mode"
+    - "silverblue_kernel_arguments_to_add | length > 0"
+
+- name: "Audit disk encryption"
+  ansible.builtin.command:
+    argv:
+      - "lsblk"
+      - "--noheadings"
+      - "--output"
+      - "TYPE,MOUNTPOINTS"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_block_devices"
+
+- name: "Report an unverified disk-encryption boundary"
+  ansible.builtin.debug:
+    msg: >-
+      No active dm-crypt device was detected. Full-disk encryption is an
+      installation-time control and must be verified or enabled manually.
+  when: "'crypt' not in silverblue_block_devices.stdout.split()"
+
+- name: "Audit Secure Boot"
+  ansible.builtin.command:
+    argv:
+      - "mokutil"
+      - "--sb-state"
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  environment:
+    LC_ALL: "C"
+  register: "silverblue_secure_boot"
+
+- name: "Report an unverified Secure Boot boundary"
+  ansible.builtin.debug:
+    msg: >-
+      Secure Boot was not reported as enabled. Firmware trust enrollment is
+      intentionally not automated by this Silverblue role.
+  when: >-
+    silverblue_secure_boot.rc != 0
+    or 'SecureBoot enabled' not in silverblue_secure_boot.stdout
+
+- name: "Inspect the hardened rpm-ostree deployment"
+  ansible.builtin.command:
+    argv:
+      - "rpm-ostree"
+      - "status"
+      - "--json"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_hardened_rpm_ostree_status"
+
+- name: "Report the hardening reboot boundary"
+  vars:
+    silverblue_hardened_deployment: >-
+      {{ (silverblue_hardened_rpm_ostree_status.stdout | from_json).deployments | first }}
+  ansible.builtin.debug:
+    msg: >-
+      A hardened rpm-ostree deployment is staged. Reboot to activate kernel
+      arguments and any package changes.
+  when: "not (silverblue_hardened_deployment.booted | default(false))"

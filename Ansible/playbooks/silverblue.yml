@@ -1,0 +1,7 @@
+---
+- name: "Reconcile the local Fedora Silverblue workstation"
+  hosts: "silverblue"
+  gather_facts: true
+
+  roles:
+    - role: "silverblue"

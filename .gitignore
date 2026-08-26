@@ -11,6 +11,9 @@
 /Ansible/inventory/hosts.yml
 /Ansible/inventory/known_hosts
 /Ansible/inventory/known_hosts.old
+/silverblue-followup.txt
+/silverblue-inventory.txt
+/silverblue-rpms.tsv
 
 # OpenTofu
 **/.terraform/

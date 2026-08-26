@@ -1,0 +1,146 @@
+---
+- name: "Configure rpm-ostree automatic updates"
+  ansible.builtin.template:
+    src: "rpm-ostreed.conf.j2"
+    dest: "/etc/rpm-ostreed.conf"
+    owner: "root"
+    group: "root"
+    mode: "0644"
+  become: true
+  notify: "Reload rpm-ostree configuration"
+
+- name: "Apply rpm-ostree configuration changes"
+  ansible.builtin.meta: "flush_handlers"
+
+- name: "Reconcile the rpm-ostree automatic-update timer"
+  ansible.builtin.systemd_service:
+    name: "rpm-ostreed-automatic.timer"
+    enabled: "{{ silverblue_automatic_update_policy != 'none' }}"
+    state: "{{ 'started' if silverblue_automatic_update_policy != 'none' else 'stopped' }}"
+  become: true
+
+- name: "Inspect the default rpm-ostree deployment"
+  ansible.builtin.command:
+    argv:
+      - "rpm-ostree"
+      - "status"
+      - "--json"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_rpm_ostree_status"
+
+- name: "Validate rpm-ostree status"
+  vars:
+    silverblue_deployments: "{{ (silverblue_rpm_ostree_status.stdout | from_json).deployments | default([]) }}"
+  ansible.builtin.assert:
+    that:
+      - "silverblue_deployments | length > 0"
+    fail_msg: "rpm-ostree did not report a deployment."
+
+- name: "Calculate package-layer changes"
+  vars:
+    silverblue_deployment: "{{ (silverblue_rpm_ostree_status.stdout | from_json).deployments | first }}"
+    silverblue_requested_packages: "{{ silverblue_deployment['requested-packages'] | default([]) }}"
+    silverblue_requested_base_removals: >-
+      {{ silverblue_deployment['requested-base-removals'] | default([]) }}
+  ansible.builtin.set_fact:
+    silverblue_packages_to_install: "{{ silverblue_layered_packages | difference(silverblue_requested_packages) | sort }}"
+    silverblue_packages_to_remove: "{{ silverblue_absent_layered_packages | intersect(silverblue_requested_packages) | sort }}"
+    silverblue_base_packages_to_remove: >-
+      {{ silverblue_removed_base_packages | difference(silverblue_requested_base_removals) | sort }}
+
+- name: "Preview base-package removals"
+  ansible.builtin.debug:
+    msg: >-
+      A new deployment would remove base packages:
+      {{ silverblue_base_packages_to_remove | join(', ') }}.
+      Package layers added in the same transaction:
+      {{ silverblue_packages_to_install | join(', ') | default('none', true) }}.
+  changed_when: true
+  when:
+    - "ansible_check_mode"
+    - "silverblue_base_packages_to_remove | length > 0"
+
+- name: "Remove base packages and atomically add required replacements"
+  ansible.builtin.command:
+    argv: >-
+      {{ ['rpm-ostree', 'override', 'remove']
+         + silverblue_base_packages_to_remove
+         + (silverblue_packages_to_install
+            | map('regex_replace', '^', '--install=')
+            | list)
+         + (silverblue_packages_to_remove
+            | map('regex_replace', '^', '--uninstall=')
+            | list) }}
+  become: true
+  changed_when: true
+  when:
+    - "not ansible_check_mode"
+    - "silverblue_base_packages_to_remove | length > 0"
+
+- name: "Preview package layers to install"
+  ansible.builtin.debug:
+    msg: "A new deployment would add package layers: {{ silverblue_packages_to_install | join(', ') }}"
+  changed_when: true
+  when:
+    - "ansible_check_mode"
+    - "silverblue_base_packages_to_remove | length == 0"
+    - "silverblue_packages_to_install | length > 0"
+
+- name: "Atomically install and remove declared package layers"
+  ansible.builtin.command:
+    argv: >-
+      {{ ['rpm-ostree', 'install', '--allow-inactive', '--idempotent', '--unchanged-exit-77']
+         + (silverblue_packages_to_remove
+            | map('regex_replace', '^', '--uninstall=')
+            | list)
+         + silverblue_packages_to_install }}
+  become: true
+  register: "silverblue_package_install"
+  changed_when: "silverblue_package_install.rc == 0"
+  failed_when: "silverblue_package_install.rc not in [0, 77]"
+  when:
+    - "not ansible_check_mode"
+    - "silverblue_base_packages_to_remove | length == 0"
+    - "silverblue_packages_to_install | length > 0"
+
+- name: "Preview package layers to remove"
+  ansible.builtin.debug:
+    msg: "A new deployment would remove package layers: {{ silverblue_packages_to_remove | join(', ') }}"
+  changed_when: true
+  when:
+    - "ansible_check_mode"
+    - "silverblue_packages_to_remove | length > 0"
+
+- name: "Remove explicitly absent package layers"
+  ansible.builtin.command:
+    argv: >-
+      {{ ['rpm-ostree', 'uninstall', '--allow-inactive', '--idempotent', '--unchanged-exit-77']
+         + silverblue_packages_to_remove }}
+  become: true
+  register: "silverblue_package_remove"
+  changed_when: "silverblue_package_remove.rc == 0"
+  failed_when: "silverblue_package_remove.rc not in [0, 77]"
+  when:
+    - "not ansible_check_mode"
+    - "silverblue_base_packages_to_remove | length == 0"
+    - "silverblue_packages_to_install | length == 0"
+    - "silverblue_packages_to_remove | length > 0"
+
+- name: "Inspect the resulting rpm-ostree deployment"
+  ansible.builtin.command:
+    argv:
+      - "rpm-ostree"
+      - "status"
+      - "--json"
+  check_mode: false
+  changed_when: false
+  register: "silverblue_resulting_rpm_ostree_status"
+
+- name: "Report a pending deployment"
+  vars:
+    silverblue_resulting_deployment: >-
+      {{ (silverblue_resulting_rpm_ostree_status.stdout | from_json).deployments | first }}
+  ansible.builtin.debug:
+    msg: "An rpm-ostree deployment is staged. Reboot when convenient to activate it."
+  when: "not (silverblue_resulting_deployment.booted | default(false))"

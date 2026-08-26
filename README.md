@@ -1,11 +1,11 @@
 <h1 align="center">Infrastructure</h1>
 
 <p align="center">
-  A minimal and hardened infrastructure stack for Hetzner Cloud.
+  A minimal and hardened infrastructure stack for Hetzner Cloud and Fedora Silverblue.
 </p>
 
 <p align="center">
-  <strong>Fedora CoreOS, Stalwart, PostgreSQL, gVisor, OpenTofu, Ansible, and SOPS/age.</strong>
+  <strong>Fedora CoreOS, Fedora Silverblue, Stalwart, PostgreSQL, gVisor, OpenTofu, Ansible, and SOPS/age.</strong>
 </p>
 
 ## Table of Contents
@@ -25,7 +25,9 @@ This repository provisions reusable hardened Fedora CoreOS VPS nodes on
 Hetzner Cloud and assigns one node the Stalwart/PostgreSQL mail role. The
 current production shape uses an x86_64 CX23 for that role. OpenTofu owns the
 cloud and DNS resources, and Ansible reconciles rootful Podman Quadlets without
-requiring Python on the servers.
+requiring Python on the servers. A separate local-only Ansible profile manages
+the Silverblue workstation's staged OS updates, deliberately sparse package
+layering, desktop/kernel hardening, and per-user Flatpaks.
 
 The goal is a small, understandable system with explicit ownership. Every VPS
 receives the same mail-independent Ignition and base firewall; only the
@@ -44,8 +46,9 @@ The deployment is split into narrow layers:
 | OpenTofu | Hetzner VPS fleet, base and role firewalls, per-node forward/reverse DNS, and the restricted Stalwart token |
 | SOPS and age | Encrypted provider and application secret scopes |
 | Ansible | Python-free reconciliation of Podman secrets, support files, networks, volumes, and Quadlets |
+| Local Ansible | Silverblue updates, package layers, host hardening, and per-user Flatpaks |
 | Quadlet | Declarative systemd lifecycle for Stalwart and PostgreSQL |
-| Stalwart plan | Idempotent listener, HTTP-header, CSP, rate-limit, and SMTP-auth policy |
+| Stalwart plan | Idempotent listener, password, protocol, queue, HTTP-header, CSP, rate-limit, and SMTP-auth policy |
 
 OpenTofu creates the final VPS from a disposable native image. The guarded
 installer then boots that same server into Hetzner Rescue, writes verified
@@ -84,11 +87,18 @@ boundaries are documented in [Architecture](Documentation/Architecture.md).
   Sigstore provenance, and a zero-change second Ansible run in CI.
 - Pins GitHub Actions to commits and container images to digests; Dependabot
   observes a seven-day cooldown before proposing updates.
+- Reconciles the local Silverblue workstation with staged OS updates, explicit
+  host package layers, compatibility-scoped host hardening, and declarative
+  per-user Flatpak remotes and applications.
 
 ## Security and Hardening
 
 Security controls are applied at every layer:
 
+- **Workstation:** staged rpm-ostree updates without automatic reboots,
+  deliberately sparse package layering, a default-drop firewall, SELinux and
+  kernel/sysctl hardening, private network identities and file defaults,
+  authenticated time, per-user Flatpaks, and fail-closed source checks.
 - **Host:** reusable FCOS kernel policy and administrator drop-ins for sysctl,
   modules, authenticated NTS time, bounded persistent logs, core dumps, SSH,
   encrypted DNS, and containers, plus masked debug services, SELinux, and an
@@ -99,15 +109,17 @@ Security controls are applied at every layer:
   forwarding destination is the loopback Stalwart bootstrap listener. Port 22
   remains reachable from every address by design.
 - **Containers:** gVisor `runsc`, read-only root filesystems, bounded temporary
-  filesystems, private networking, PostgreSQL no-new-privileges, and
-  systemd-managed restart ordering.
+  filesystems, private networking, PostgreSQL no-new-privileges, health-driven
+  systemd restarts, and explicit restart ordering.
 - **Stalwart:** client protocols use implicit TLS only; SMTP port 25 remains a
   non-authenticated federation listener with mandatory STARTTLS before message
   transfer. HTTPS, submission, and IMAPS require TLS 1.3; SMTP federation
   retains TLS 1.2 compatibility.
   CalDAV, CardDAV, and WebDAV share the hardened HTTPS listener and have
-  explicit resource bounds. A declarative plan removes POP3, ManageSieve,
-  cleartext HTTP, and STARTTLS client listeners.
+  explicit resource bounds. Authentication uses an enforced Argon2id password
+  policy, while IMAP, JMAP, authenticated submission, and the outbound queue
+  have explicit abuse and resource limits. A declarative plan removes POP3,
+  ManageSieve, cleartext HTTP, and STARTTLS client listeners.
 - **Secrets:** separate encrypted provider and mail scopes; decrypted values
   enter only the child process that needs them. Ansible creates Podman secrets
   over standard input and renders no credentials into Quadlets.
@@ -144,6 +156,12 @@ residual risks, and secret boundaries.
 The target host needs no manually installed configuration runtime. Fedora
 CoreOS supplies systemd, Podman, and the Quadlet generator; Ignition installs
 the pinned gVisor bundle during first boot.
+
+The Silverblue profile runs locally, layers `make`, Ansible Core, and OpenTofu,
+and installs a checksum-pinned upstream SOPS binary. Together they provide the
+host administration entry points. See
+[Silverblue Workstation](Documentation/Silverblue.md) for the one-time bootstrap
+and image-native management model.
 
 ## Deploy
 
@@ -228,5 +246,6 @@ and recovery guidance live in [Operations](Documentation/Operations.md).
 - [DNS Ownership](Documentation/DNS.md)
 - [Deployment](Documentation/Deployment.md)
 - [Operations](Documentation/Operations.md)
+- [Silverblue Workstation](Documentation/Silverblue.md)
 - [Stalwart Production Setup](Documentation/Stalwart.md)
 - [Security Model](Documentation/Security.md)

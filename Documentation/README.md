@@ -13,6 +13,8 @@ infrastructure repository.
   running Quadlet stack.
 - [Operations](Operations.md) covers routine reconciliation, diagnostics,
   upgrades, backups, and recovery.
+- [Silverblue Workstation](Silverblue.md) covers local staged OS updates,
+  explicit package layering, host hardening, and per-user Flatpak reconciliation.
 - [Stalwart Production Setup](Stalwart.md) records the production identity,
   secure bootstrap tunnel, DNS/ACME settings, listeners, and Web UI workflow.
 - [Security Model](Security.md) records trust assumptions, layered controls,

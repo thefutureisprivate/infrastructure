@@ -32,7 +32,6 @@ locals {
     mta_sts_policy            = { subname = "_mta-sts", type = "TXT" }
     user_agent_autoconfig     = { subname = "ua-auto-config", type = "CNAME" }
     user_agent_autoconfig_txt = { subname = "_ua-auto-config", type = "TXT" }
-    legacy_autoconfig         = { subname = "autoconfig", type = "CNAME" }
     autodiscover              = { subname = "autodiscover", type = "CNAME" }
     jmap_service              = { subname = "_jmap._tcp", type = "SRV" }
     caldav_service            = { subname = "_caldavs._tcp", type = "SRV" }

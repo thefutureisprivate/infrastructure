@@ -82,8 +82,9 @@ jobs:
       - name: "Check Ansible syntax"
         env:
           ANSIBLE_CONFIG: "Ansible/ansible.cfg"
-        run: >-
+        run: |
           ansible-playbook --syntax-check -i Ansible/inventory/hosts.example.yml Ansible/playbooks/quadlets.yml
+          ansible-playbook --syntax-check -i Ansible/inventory/silverblue.yml Ansible/playbooks/silverblue.yml
 
       - name: "Lint Ansible"
         env:

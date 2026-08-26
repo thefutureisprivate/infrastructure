@@ -1,0 +1,24 @@
+---
+silverblue_automatic_update_policy: "stage"
+silverblue_layered_packages: []
+silverblue_absent_layered_packages: []
+silverblue_removed_base_packages: []
+silverblue_opentofu_repository: {}
+silverblue_sops: {}
+silverblue_flatpak_remotes: []
+silverblue_flatpaks: []
+silverblue_hardening_enabled: false
+silverblue_hostname: "localhost"
+silverblue_network_mac_randomization: "random"
+silverblue_firewall_zone: "silverblue"
+silverblue_firewall_services: []
+silverblue_masked_units: []
+silverblue_sysctl_settings: {}
+silverblue_blocked_kernel_modules: []
+silverblue_kernel_arguments: []
+silverblue_intel_kernel_arguments: []
+silverblue_amd_kernel_arguments: []
+silverblue_chrony_nts_servers: []
+silverblue_faillock_deny: 5
+silverblue_faillock_interval: 900
+silverblue_faillock_unlock_time: 900

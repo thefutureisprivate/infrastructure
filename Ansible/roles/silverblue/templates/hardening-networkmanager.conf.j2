@@ -1,0 +1,9 @@
+# Managed by Ansible. Per-connection settings remain available for networks that require a stable address.
+[device]
+wifi.scan-rand-mac-address=yes
+
+[connection]
+connection.zone={{ silverblue_firewall_zone }}
+ethernet.cloned-mac-address={{ silverblue_network_mac_randomization }}
+ipv6.ip6-privacy=2
+wifi.cloned-mac-address={{ silverblue_network_mac_randomization }}

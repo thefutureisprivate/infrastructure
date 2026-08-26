@@ -69,7 +69,7 @@ flowchart LR
 | `Scripts/install-fcos*.sh` | Guarded Rescue activation, hash-checked installer transport, direct FCOS disk installation, and installation-state transition | Cloud resource declaration, application secrets, or running-host reconciliation |
 | `SOPS/` | Encrypted provider and application credentials, age recipient policy, secret handoff helpers | Infrastructure state or persistent application data |
 | `Ansible/` | Group-scoped Podman secrets, Quadlet source files, support files, networks, volumes, and service reconciliation | Host boot configuration or cloud lifecycle |
-| `Stalwart/` | Declarative server identity, Domain, deSEC and staged ACME bootstrap, exact TLS listeners, verified local Web UI Application, HTTP security headers and CSP, HTTP and DAV resource limits, and SMTP authentication policy | Accounts, mailbox data, or unrelated DNS records |
+| `Stalwart/` | Declarative server identity, Domain, deSEC and staged ACME bootstrap, exact TLS listeners, verified local Web UI Application, password policy, protocol and queue resource limits, HTTP security headers and CSP, and SMTP authentication policy | Accounts, mailbox data, or unrelated DNS records |
 | Stalwart | Mail service configuration and explicitly authorized DNS owner/type pairs, including inbound SMTP TLSA | Zone lifecycle, CAA, DMARC, TLS-RPT, HTTPS records, unrelated names, address records, reverse DNS, or token management |
 | PostgreSQL | Stalwart relational data | Host networking or external database access |
 
@@ -152,7 +152,9 @@ Both containers have read-only root filesystems and explicit writable volumes
 or tmpfs mounts. Stalwart's storage configuration references the PostgreSQL
 password by environment-variable name, and the restricted deSEC token is
 available for the later Stalwart DNS configuration. PostgreSQL receives its
-password through a mounted Podman secret.
+password through a mounted Podman secret. Both containers have runtime health
+checks; Stalwart's liveness probe causes systemd to restart an unresponsive
+service after three consecutive failures.
 
 ## DNS Authority
 
@@ -186,7 +188,7 @@ ownership split is recorded in [DNS Ownership](DNS.md).
 | --- | --- | --- |
 | Provider credentials | `SOPS/infrastructure.sops.yaml` | SOPS-encrypted to committed age recipients |
 | Mail credentials | `SOPS/mail.sops.yaml` | SOPS-encrypted to committed age recipients |
-| Stalwart hardening API key | `SOPS/mail.sops.yaml` | Replace-mode permissions limited to the five managed object types; supplied only to the local CLI process |
+| Stalwart hardening API key | `SOPS/mail.sops.yaml` | Replace-mode permissions limited to the declaratively managed object types; supplied only to the local CLI process |
 | deSEC child token | OpenTofu state and encrypted mail scope | Sensitive output plus SOPS encryption; state itself must be protected separately |
 | OpenTofu state | Local by default | Ignored by Git; use an encrypted, access-controlled remote backend for shared automation |
 | Generated inventory and host keys | `Ansible/inventory/` | Ignored by Git; inventory mode is `0600` |

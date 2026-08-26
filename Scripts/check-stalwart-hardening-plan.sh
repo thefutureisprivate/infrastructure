@@ -5,9 +5,9 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "${script_dir}/.." && pwd)
 
 jq -e -s '
-  length == 7 and
-  (map(."@type") == ["reconcile", "upsert", "update", "update", "update", "update", "reconcile"]) and
-  (map(.object) == ["NetworkListener", "MtaInboundThrottle", "Http", "WebDav", "MtaStageAuth", "MtaStageMail", "Application"]) and
+  length == 11 and
+  (map(."@type") == ["reconcile", "upsert", "upsert", "update", "update", "update", "update", "update", "update", "update", "reconcile"]) and
+  (map(.object) == ["NetworkListener", "MtaInboundThrottle", "MtaQueueQuota", "Http", "Imap", "Jmap", "Authentication", "WebDav", "MtaStageAuth", "MtaStageMail", "Application"]) and
   (.[0].value | keys | sort == ["https", "imaps", "smtp", "submissions"]) and
   (.[0].value.smtp.tlsImplicit == false) and
   (.[0].value.submissions.tlsImplicit == true) and
@@ -25,13 +25,53 @@ jq -e -s '
     "match": {"else": "true"},
     "rate": {"count": 25, "period": 1000}
   }) and
-  (.[2].value.enableHsts == true) and
-  (.[2].value.usePermissiveCors == false) and
-  (.[2].value.useXForwarded == false) and
-  (.[2].value.responseHeaders["Content-Security-Policy"] | contains("default-src"))
-  and (.[2].value.responseHeaders["Content-Security-Policy"] | contains("script-src \u0027self\u0027 \u0027sha256-DN+qOOjtGVsV8lkg72s4vC1jiBzlp3i4PLyWBwwmEBE=\u0027"))
-  and (.[2].value.responseHeaders["Content-Security-Policy"] | contains("script-src \u0027unsafe-inline\u0027") | not)
-  and (.[3].value == {
+  (.[1].value["authenticated-submission-hour"] == {
+    "enable": true,
+    "description": "Authenticated submission hourly limit",
+    "key": {"authenticatedAs": true},
+    "match": {"else": "!is_empty(authenticated_as)"},
+    "rate": {"count": 100, "period": 3600000}
+  }) and
+  (.[1].value["authenticated-submission-day"] == {
+    "enable": true,
+    "description": "Authenticated submission daily limit",
+    "key": {"authenticatedAs": true},
+    "match": {"else": "!is_empty(authenticated_as)"},
+    "rate": {"count": 500, "period": 86400000}
+  }) and
+  (.[2].matchOn == ["description"]) and
+  (.[2].value["sender-domain-queue"] == {
+    "enable": true,
+    "description": "Sender-domain outbound queue limit",
+    "key": {"senderDomain": true},
+    "match": {"else": "true"},
+    "messages": 5000,
+    "size": 1073741824
+  }) and
+  (.[3].value.enableHsts == true) and
+  (.[3].value.usePermissiveCors == false) and
+  (.[3].value.useXForwarded == false) and
+  (.[3].value.responseHeaders["Content-Security-Policy"] | contains("default-src"))
+  and (.[3].value.responseHeaders["Content-Security-Policy"] | contains("script-src \u0027self\u0027 \u0027sha256-DN+qOOjtGVsV8lkg72s4vC1jiBzlp3i4PLyWBwwmEBE=\u0027"))
+  and (.[3].value.responseHeaders["Content-Security-Policy"] | contains("script-src \u0027unsafe-inline\u0027") | not)
+  and (.[4].value == {
+    "maxConcurrent": 8,
+    "maxRequestRate": {"count": 1000, "period": 60000},
+    "maxRequestSize": 52428800
+  })
+  and (.[5].value == {
+    "maxConcurrentRequests": 4,
+    "maxRequestSize": 10000000,
+    "maxMethodCalls": 16
+  })
+  and (.[6].value == {
+    "passwordHashAlgorithm": "argon2id",
+    "passwordMinLength": 16,
+    "passwordMinStrength": "four",
+    "maxApiKeys": 2,
+    "maxAppPasswords": 3
+  })
+  and (.[7].value == {
     "enableAssistedDiscovery": false,
     "maxLockTimeout": 3600000,
     "maxLocks": 10,
@@ -40,9 +80,9 @@ jq -e -s '
     "requestMaxSize": 26214400,
     "maxResults": 2000
   })
-  and (.[5].value.isSenderAllowed.else == "is_tls && (!is_empty(authenticated_as) || !key_exists(\u0027spam-block\u0027, sender_domain))")
-  and (.[6].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip")
-  and (.[6].value.webui.urlPrefix | keys | sort == ["/account", "/admin"])
+  and (.[9].value.isSenderAllowed.else == "is_tls && (!is_empty(authenticated_as) || !key_exists(\u0027spam-block\u0027, sender_domain))")
+  and (.[10].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip")
+  and (.[10].value.webui.urlPrefix | keys | sort == ["/account", "/admin"])
 ' "${repo_root}/Stalwart/hardening.ndjson" >/dev/null
 
 printf 'Stalwart hardening plan: OK\n'

@@ -74,14 +74,14 @@ for image_ref in "${tool_images[@]}"; do
   esac
 done
 
-stalwart_pattern='^docker\.io/stalwartlabs/stalwart:(v[0-9]+\.[0-9]+\.[0-9]+)@sha256:[0-9a-f]{64}$'
+stalwart_pattern='^docker\.io/stalwartlabs/stalwart:(v[0-9]+\.[0-9]+\.[0-9]+)-alpine@sha256:[0-9a-f]{64}$'
 stalwart_cli_pattern='^docker\.io/stalwartlabs/cli:([0-9]+\.[0-9]+\.[0-9]+)@sha256:[0-9a-f]{64}$'
 postgres_pattern='^docker\.io/library/postgres:[0-9]+\.[0-9]+-alpine@sha256:[0-9a-f]{64}$'
 butane_pattern='^quay\.io/coreos/butane:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$'
 coreos_installer_pattern='^quay\.io/coreos/coreos-installer:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$'
 
 if [[ ! ${stalwart_image} =~ ${stalwart_pattern} ]]; then
-  printf 'Stalwart must use an exact vMAJOR.MINOR.PATCH tag and sha256 digest\n' >&2
+  printf 'Stalwart must use an exact vMAJOR.MINOR.PATCH-alpine tag and sha256 digest\n' >&2
   exit 1
 fi
 stalwart_tag=${BASH_REMATCH[1]}

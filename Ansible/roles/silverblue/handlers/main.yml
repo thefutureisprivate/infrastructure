@@ -1,0 +1,50 @@
+---
+- name: "Reload rpm-ostree configuration"
+  ansible.builtin.command:
+    argv:
+      - "rpm-ostree"
+      - "reload"
+  become: true
+  changed_when: true
+
+- name: "Apply sysctl hardening"
+  ansible.builtin.systemd_service:
+    name: "systemd-sysctl.service"
+    state: "restarted"
+  become: true
+
+- name: "Reload NetworkManager configuration"
+  ansible.builtin.command:
+    argv:
+      - "nmcli"
+      - "general"
+      - "reload"
+      - "conf"
+  become: true
+  changed_when: true
+
+- name: "Restart systemd-resolved"
+  ansible.builtin.systemd_service:
+    name: "systemd-resolved.service"
+    state: "restarted"
+  become: true
+
+- name: "Restart chronyd"
+  ansible.builtin.systemd_service:
+    name: "chronyd.service"
+    state: "restarted"
+  become: true
+
+- name: "Reload firewalld"
+  ansible.builtin.systemd_service:
+    name: "firewalld.service"
+    state: "reloaded"
+  become: true
+
+- name: "Update system dconf databases"
+  ansible.builtin.command:
+    argv:
+      - "dconf"
+      - "update"
+  become: true
+  changed_when: true
