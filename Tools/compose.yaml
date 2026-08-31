@@ -3,6 +3,6 @@
 # artifacts. Dependabot updates the readable tags and matching digests.
 services:
   butane:
-    image: "quay.io/coreos/butane:v0.29.0@sha256:13fec166cb47a8e053dcc23256c0ca41aaa1c61cab39793832aaf8894ca78c8f"
+    image: "quay.io/coreos/butane:v2.27.0@sha256:d264fba5a02ec7a5525b7cd4ab04090e8c70d0ee42a74a90a0e2f89633ae720c"
   coreos-installer:
     image: "quay.io/coreos/coreos-installer:v0.26.0@sha256:2c94387e76ae351a4183f29707fd7be57a9290675524391bdb17b40de1e088ff"
