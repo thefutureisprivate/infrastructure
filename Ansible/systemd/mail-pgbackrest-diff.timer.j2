@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily differential encrypted pgBackRest backup
+
+[Timer]
+OnCalendar=Mon..Sat *-*-* 02:00:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+FixedRandomDelay=true
+Unit=mail-pgbackrest-backup@diff.service
+
+[Install]
+WantedBy=timers.target

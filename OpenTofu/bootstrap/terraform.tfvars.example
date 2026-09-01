@@ -1,0 +1,3 @@
+state_bucket_name  = "replace-with-a-globally-unique-state-bucket"
+scaleway_project_id = "00000000-0000-0000-0000-000000000000"
+scaleway_region     = "fr-par"

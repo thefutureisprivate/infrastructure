@@ -5,3 +5,10 @@
 # and manage tokens; OpenTofu uses it to mint Stalwart's restricted child token.
 HCLOUD_TOKEN: "replace-with-a-hetzner-cloud-api-token"
 DESEC_API_TOKEN: "replace-with-a-desec-api-token"
+MINIO_USER: "replace-with-the-hetzner-backup-project-admin-access-key"
+MINIO_PASSWORD: "replace-with-the-hetzner-backup-project-admin-secret-key"
+B2_APPLICATION_KEY_ID: "replace-with-a-backblaze-account-or-bucket-admin-key-id"
+B2_APPLICATION_KEY: "replace-with-the-backblaze-admin-application-key"
+SCW_ACCESS_KEY: "replace-with-the-scaleway-opentofu-access-key"
+SCW_SECRET_KEY: "replace-with-the-scaleway-opentofu-secret-key"
+TOFU_STATE_PASSPHRASE: "replace-with-at-least-32-random-characters-kept-offline-too"

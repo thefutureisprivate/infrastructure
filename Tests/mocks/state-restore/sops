@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ $* == *'--decrypt'* ]]
+[[ $* == *'--input-type json'* ]]
+[[ $* == *'--output-type json'* ]]
+
+cat <<'EOF'
+{"version":4,"terraform_version":"1.12.6","serial":7,"lineage":"state-lineage","outputs":{"credential":{"value":"top-secret-output","type":"string","sensitive":true}},"resources":[{"mode":"managed","type":"example_resource","name":"restored","provider":"provider[\"example.test/provider\"]","instances":[]}]}
+EOF

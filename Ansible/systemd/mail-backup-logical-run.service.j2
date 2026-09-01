@@ -1,0 +1,17 @@
+[Unit]
+Description=Run the age-encrypted logical PostgreSQL archive under the host backup lock
+Requires=mail-postgres.service mail-backup-lock.service
+After=mail-postgres.service mail-backup-lock.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ quadlet_directory }}/mail-backup-run.sh logical
+ExecStop=-/usr/bin/systemctl stop mail-backup-logical-job.service
+StateDirectory=mail-backup
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectSystem=full
+TimeoutStartSec=43320
+TimeoutStopSec=300

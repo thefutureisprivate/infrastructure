@@ -5,9 +5,9 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "${script_dir}/.." && pwd)
 
 jq -e -s '
-  length == 13 and
-  (map(."@type") == ["reconcile", "upsert", "upsert", "upsert", "update", "update", "update", "update", "update", "update", "update", "update", "reconcile"]) and
-  (map(.object) == ["NetworkListener", "MtaInboundThrottle", "MtaQueueQuota", "MtaTlsStrategy", "MtaOutboundStrategy", "Http", "Imap", "Jmap", "Authentication", "WebDav", "MtaStageAuth", "MtaStageMail", "Application"]) and
+  length == 15 and
+  (map(."@type") == ["reconcile", "upsert", "upsert", "upsert", "update", "update", "update", "update", "update", "update", "update", "update", "update", "update", "reconcile"]) and
+  (map(.object) == ["NetworkListener", "MtaInboundThrottle", "MtaQueueQuota", "MtaTlsStrategy", "MtaOutboundStrategy", "Http", "Imap", "Jmap", "Authentication", "ReportSettings", "WebDav", "MtaStageAuth", "MtaStageMail", "DnsResolver", "Application"]) and
   (.[0].value | keys | sort == ["https", "imaps", "smtp", "submissions"]) and
   (.[0].value.smtp.tlsImplicit == false) and
   (.[0].value.submissions.tlsImplicit == true) and
@@ -40,14 +40,14 @@ jq -e -s '
     "rate": {"count": 500, "period": 86400000}
   }) and
   (.[2].matchOn == ["description"]) and
-  (.[2].value["sender-domain-queue"] == {
+  (.[2].value == {"sender-domain-queue": {
     "enable": true,
     "description": "Sender-domain outbound queue limit",
     "key": {"senderDomain": true},
     "match": {"else": "true"},
     "messages": 5000,
     "size": 1073741824
-  }) and
+  }}) and
   (.[3].matchOn == ["name"]) and
   (.[3].value == {
     "default": {
@@ -86,6 +86,10 @@ jq -e -s '
     "maxAppPasswords": 3
   })
   and (.[9].value == {
+    "inboundReportAddresses": {"reports@thefutureisprivate.dev": true},
+    "inboundReportForwarding": true
+  })
+  and (.[10].value == {
     "enableAssistedDiscovery": false,
     "maxLockTimeout": 3600000,
     "maxLocks": 10,
@@ -94,18 +98,36 @@ jq -e -s '
     "requestMaxSize": 26214400,
     "maxResults": 2000
   })
-  and (.[11].value.isSenderAllowed.else == "is_tls && (!is_empty(authenticated_as) || !key_exists(\u0027spam-block\u0027, sender_domain))")
-  and (.[12].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip")
-  and (.[12].value.webui.urlPrefix | keys | sort == ["/account", "/admin"])
+  and (.[12].value.isSenderAllowed.else == "is_tls && (!is_empty(authenticated_as) || !key_exists(\u0027spam-block\u0027, sender_domain))")
+  and (.[13].value == {
+    "@type": "Cloudflare",
+    "useTls": true,
+    "preserveIntermediates": true,
+    "concurrency": 2,
+    "timeout": 5000,
+    "attempts": 2,
+    "tcpOnError": true,
+    "enableEdns": true
+  })
+  and (.[14].value.webui.resourceUrl == "file:///opt/stalwart-webui/webui.zip")
+  and (.[14].value.webui.urlPrefix | keys | sort == ["/account", "/admin"])
 ' "${repo_root}/Stalwart/hardening.ndjson" >/dev/null
 
 grep -Fq -- 'query MtaTlsStrategy' \
   "${repo_root}/Scripts/stalwart-hardening.sh"
 grep -Fq -- 'get MtaOutboundStrategy --fields tls' \
   "${repo_root}/Scripts/stalwart-hardening.sh"
+grep -Fq -- 'get ReportSettings --fields' \
+  "${repo_root}/Scripts/stalwart-hardening.sh"
+grep -Fq -- 'get DnsResolver --json' \
+  "${repo_root}/Scripts/stalwart-hardening.sh"
 grep -Fq -- 'show_drift MtaTlsStrategy' \
   "${repo_root}/Scripts/stalwart-hardening.sh"
 grep -Fq -- 'show_drift MtaOutboundStrategy' \
+  "${repo_root}/Scripts/stalwart-hardening.sh"
+grep -Fq -- 'show_drift ReportSettings' \
+  "${repo_root}/Scripts/stalwart-hardening.sh"
+grep -Fq -- 'show_drift DnsResolver' \
   "${repo_root}/Scripts/stalwart-hardening.sh"
 
 printf 'Stalwart hardening plan: OK\n'

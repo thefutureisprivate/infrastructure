@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ " $* " == *' output -json mail_backup_storage '* ]]; then
+  case ${MOCK_BACKUP_RUNTIME_ENABLED:-true} in
+    true) printf '%s\n' '{"runtime_enabled":true}' ;;
+    false) printf '%s\n' '{"runtime_enabled":false}' ;;
+    invalid) printf '%s\n' '{"runtime_enabled":"invalid"}' ;;
+    *) exit 2 ;;
+  esac
+  exit 0
+fi
+
+[[ " $* " == *' output -json mail_backup_runtime_credentials '* ]] || {
+  printf 'Unexpected tofu mock arguments: %s\n' "$*" >&2
+  exit 2
+}
+
+case ${MOCK_BACKUP_CREDENTIALS:-complete} in
+  missing) exit 1 ;;
+  incomplete)
+    printf '%s\n' '{"b2_pgbackrest_key_id":"too-short"}'
+    exit 0
+    ;;
+  complete) ;;
+  *) exit 2 ;;
+esac
+
+printf '%s\n' '{
+  "b2_pgbackrest_key_id": "b2-id-0123456789",
+  "b2_pgbackrest_key": "b2-secret-No-Newline+12345",
+  "b2_archive_key_id": "b2-archive-012345",
+  "b2_archive_key": "b2-archive-secret+12345",
+  "scaleway_access_key": "scw-access-012345",
+  "scaleway_secret_key": "scw-secret-ends-in-equals=="
+}'

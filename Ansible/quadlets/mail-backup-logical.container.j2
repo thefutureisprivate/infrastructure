@@ -1,0 +1,37 @@
+[Unit]
+Description=Create a signed age-encrypted logical PostgreSQL archive
+Documentation=https://www.postgresql.org/docs/current/app-pgdump.html https://age-encryption.org/
+Requires=gvisor-install.service mail-postgres.service
+After=gvisor-install.service mail-postgres.service network-online.target
+
+[Container]
+Image={{ mail_postgres_backup_image }}
+Pull=never
+PodmanArgs=--runtime=runsc
+SecurityLabelDisable=true
+ContainerName=mail-backup-logical
+Network=mail-postgres.network
+Volume=mail-backup-staging.volume:/backup:U
+Volume={{ quadlet_directory }}/mail-backup-logical.sh:/usr/local/sbin/mail-backup-logical:ro
+Secret=mail-postgres-dump-password,type=env,target=PGPASSWORD
+Secret=mail-backup-signing-private-key,type=mount,target=mail-backup-signing-private-key
+Secret=mail-backup-signing-public-key,type=mount,target=mail-backup-signing-public-key
+Environment=PGCONNECT_TIMEOUT=30
+Environment=MAIL_BACKUP_SCALEWAY_BUCKET={{ mail_backup_scaleway_bucket }}
+Environment=MAIL_BACKUP_HETZNER_BUCKET={{ mail_backup_hetzner_bucket }}
+Environment=MAIL_BACKUP_B2_BUCKET={{ mail_backup_b2_bucket }}
+Environment=MAIL_BACKUP_AGE_RECIPIENT={{ mail_backup_age_recipient }}
+Environment=HOME=/tmp
+Exec=/usr/local/sbin/mail-backup-logical
+User=70:70
+NoNewPrivileges=true
+DropCapability=all
+ReadOnly=true
+RunInit=true
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777
+
+[Service]
+Type=oneshot
+UMask=0077
+TimeoutStartSec=21600
+TimeoutStopSec=300

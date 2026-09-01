@@ -10,7 +10,7 @@ The primary protected assets are:
 
 - mail data and PostgreSQL contents;
 - Stalwart administrator and user credentials;
-- Hetzner and deSEC provider authority;
+- Hetzner, Backblaze, Scaleway, and deSEC provider authority;
 - the restricted Stalwart deSEC token;
 - OpenTofu state;
 - the SOPS age private identity;
@@ -149,9 +149,11 @@ The destructive step is constrained by several independent checks:
   checked by SHA-256 before execution;
 - coreos-installer runs without `--insecure`, so Fedora's image signature must
   validate;
-- the marker changes to `installed` only after SSH observes Fedora CoreOS,
-  `VARIANT_ID=coreos`, an ostree boot, and working non-interactive operator
-  sudo.
+- after installation the marker remains `awaiting-verification` until a
+  separately obtained permanent host key is present in
+  `Ansible/inventory/known_hosts` and strict SSH observes Fedora CoreOS,
+  `VARIANT_ID=coreos`, an ostree boot, working non-interactive operator sudo,
+  and gVisor runtime readiness; only then does it change to `installed`.
 
 The key-only `thefutureisprivate` operator receives a user-specific
 `NOPASSWD` sudoers drop-in because Ansible reconciles root-owned host state.
@@ -169,8 +171,9 @@ accepts it only into an isolated, deleted-on-exit known-hosts file. This is
 temporary trust on first use, not independent host authentication. Rescue
 receives no SOPS values or application credentials: only the public Ignition
 configuration and digest-pinned installer runtime cross that connection. The
-permanent FCOS host key still requires independent verification before
-Ansible is allowed to connect.
+permanent FCOS verification uses `StrictHostKeyChecking=yes` against the
+repository inventory pin; an absent or mismatched pin leaves the authenticated
+cloud marker at `awaiting-verification` and blocks normal deployment.
 
 ## Container Boundary
 
@@ -178,6 +181,10 @@ Both Stalwart and PostgreSQL use the explicitly registered `runsc` OCI runtime.
 The containers require `gvisor-install.service`, so a missing or failed runtime
 installation blocks application startup rather than silently falling back to
 the default runtime.
+
+Stalwart runs the official Alpine image at the exact reviewed version and
+immutable digest declared in `Ansible/compose.yaml`. The VPS never compiles or
+derives a Stalwart image; upgrades are limited to reviewed upstream artifacts.
 
 The installer:
 
@@ -194,7 +201,8 @@ The installer:
 Both Quadlets add read-only roots, bounded tmpfs mounts, named persistent
 volumes, and no-new-privileges. Stalwart alone joins the externally routed mail
 network and reaches PostgreSQL over a separate Podman network marked internal;
-PostgreSQL joins only that database network and has no published host port.
+PostgreSQL has no published host port and joins a second bridge only for
+outbound encrypted backup traffic when backups are enabled.
 Stalwart runs as the image's unprivileged UID 2000, drops Podman's default
 capabilities, and receives only `CAP_NET_BIND_SERVICE`, which the upstream image
 requires for privileged mail ports. It publishes only the services selected in
@@ -228,6 +236,11 @@ the selected TLS strategy always validates certificates and has no retry branch
 to Stalwart's permissive `invalid-tls` strategy. Stalwart's TLS library does not
 offer TLS 1.0 or TLS 1.1 on any listener.
 
+Stalwart performs external MTA resolution through its Cloudflare DNS-over-TLS
+backend with EDNS and TCP fallback enabled. This avoids treating truncated or
+incompletely forwarded DNSSEC proofs from the Podman bridge resolver as bogus
+TLSA data. DANE still fails closed on genuinely invalid DNSSEC signatures.
+
 The HTTP singleton enables HSTS, keeps permissive CORS and untrusted forwarded
 addresses disabled, reduces anonymous and authenticated rate limits, and sets a
 comprehensive browser security-header baseline. CSP denies resources by
@@ -258,8 +271,8 @@ Two independent SOPS files limit routine secret exposure:
 
 | Scope | Values | Consumers |
 | --- | --- | --- |
-| Infrastructure | `HCLOUD_TOKEN`, bootstrap `DESEC_API_TOKEN` | OpenTofu and the direct FCOS Rescue installer |
-| Mail runtime | `MAIL_POSTGRES_PASSWORD`, restricted `STALWART_DESEC_API_TOKEN` | Ansible mail deployment |
+| Infrastructure | Cloud/DNS administrator credentials and `TOFU_STATE_PASSPHRASE` | Scoped OpenTofu and direct FCOS Rescue children |
+| Mail runtime | Database/DNS credentials, backup-provider keys, and independent pgBackRest cipher passphrases | Ansible mail deployment |
 | Stalwart hardening | `STALWART_CONFIG_API_TOKEN` | Local pinned Stalwart CLI container |
 
 `SOPS/exec-env.sh` verifies SOPS metadata, clears all known secret names
@@ -272,10 +285,9 @@ passes values through standard input to `podman secret create` and stores only
 the desired SHA-256 hash in a root-only directory to support idempotence.
 The Stalwart configuration key is never installed on the server; it is exposed
 only to the one local CLI child process. Its Replace-mode permission set covers
-only the authentication prerequisite and the NetworkListener, Application,
-Http, WebDav, MtaStageAuth, MtaStageMail, and MtaSts objects plus creation of
-the immediate ReloadSettings action; the key cannot authenticate to a mail or
-DAV protocol.
+only the authentication prerequisite and the declaratively managed system
+objects, including `DnsResolver`, plus creation of the immediate
+`ReloadSettings` action; the key cannot authenticate to a mail or DAV protocol.
 
 Stalwart's cluster lease identity is explicitly set to the validated, unique
 Ansible inventory hostname. This avoids treating Podman's per-container ID as
@@ -299,10 +311,68 @@ publication.
 Successful completion additionally requires the operator to create and test a
 regular Web UI administrator before the recovery backdoor is revoked.
 
-OpenTofu state still contains the generated Stalwart token. A `sensitive`
-output hides normal CLI display but does not encrypt state. Local ignored state
-is acceptable only while the workstation is adequately protected; shared CI
-or multi-operator use requires an encrypted, access-controlled remote backend.
+OpenTofu state contains the generated Stalwart, B2, and Scaleway runtime
+credentials. `Scripts/tofu.sh` supplies PBKDF2/SHA-512 key derivation and
+enforced AES-GCM state and plan encryption for every Make and CI entry point.
+An encrypted state cannot be read by a direct invocation without that
+configuration. State is stored in a dedicated, versioned Scaleway bucket with
+an S3 lock file. No repository workflow permits plaintext state or plan input.
+A `sensitive` output remains a display control, not encryption, so state access
+and the passphrase are separate recovery authorities.
+
+Successful applies also stream a state copy directly into SOPS/age encryption
+under the repository's ignored `OpenTofu/state-snapshots/` directory. No plaintext snapshot is
+written, and these timestamped files are recovery inputs rather than a second
+writable backend. They provide recovery from remote-bucket loss but not from
+simultaneous loss or compromise of the workstation and its age identity.
+
+## Backup Boundary
+
+PostgreSQL is the authoritative Stalwart configuration, blob, lookup, and mail
+data store. pgBackRest continuously archives WAL and creates full and
+differential physical backups in two S3-compatible hot repositories. Each uses
+AES-256-CBC with a distinct passphrase. A daily logical dump is streamed through
+age, signed with an isolated Ed25519 key, and uploaded to all three providers;
+no plaintext dump is written to disk.
+
+PostgreSQL uses three distinct identities. The `postgres` administrator owns
+server-wide backup controls, `stalwart` is a non-superuser application and
+database-owner role, and `stalwart_dump` inherits only `pg_read_all_data` for
+logical exports. PostgreSQL startup does not complete until an idempotent gate
+has reconciled those roles, including migration of data directories originally
+initialized with `stalwart` as the bootstrap superuser. An application SQL
+compromise therefore cannot use `COPY PROGRAM`, server-file roles, or
+`ALTER SYSTEM` to recover pgBackRest credentials from the database process.
+
+PostgreSQL's B2 credential is confined to `stalwart/pgbackrest/`. Hetzner uses
+one project-wide key for both physical and logical backups to keep operation
+simple; that dedicated project contains only the mutable hot-backup bucket. A
+host compromise can therefore alter or delete the Hetzner copy. The hot
+repositories remain availability copies: versioning may preserve older
+versions, but a compromised writer can disrupt direct PITR until a trusted
+operator selects pre-compromise versions. The separate uploader receives the
+shared Hetzner key, prefix-confined B2 and Scaleway credentials, and only the
+public verification key; the no-egress dump job receives the database reader
+and private signing key but no storage credential. The uploader cannot forge a
+candidate by itself, and the signer cannot directly use storage credentials.
+The trusted host runner intentionally promotes any valid signer output, so a
+signer compromise can create a candidate that the runner publishes. Recovery
+therefore requires signature verification with the retained public-key ring and
+selection of object versions created before the compromise cutoff. Hot buckets
+are versioned and automatic pgBackRest expiry is disabled. The Scaleway identity is confined
+to a dedicated project and receives only `ObjectStorageObjectsWrite`; the
+Paris bucket adds versioning, compliance object lock, lifecycle expiry, and a
+Glacier transition. Within an active Scaleway account, compliance retention
+prevents every bucket identity, including organization owners and
+administrators, from deleting or shortening retention for locked objects.
+Deleting the entire Scaleway account remains a provider-documented exception.
+OpenTofu operator credentials can still alter policy for future objects.
+
+The public cold-backup age recipient is safe to deploy. Its private identity and
+both pgBackRest passphrases remain offline recovery authorities. Availability
+depends on preserving and periodically testing them. Hot retention requires
+reviewed operator maintenance and temporary B2 delete permission. The immutable
+Scaleway copy, rather than the Hetzner hot copy, is the ransomware boundary.
 
 ## DNS Boundary
 
@@ -337,15 +407,18 @@ a separate default-deny child token that cannot:
 - authenticate from outside the mail server's declared public addresses.
 
 Every permissive child-token policy has an exact domain, subname, and type.
-DKIM selectors are explicit generated OpenTofu inputs discovered from
-Stalwart before automatic publication; unrelated names, wildcard grants, A,
-and AAAA are absent. TLSA grants are limited to the five exact enabled public
-TLS listener names. CAA, DMARC, and TLS-RPT are absent from the child token and
-owned by OpenTofu, preventing Stalwart's shared reporting-URI setting from
-combining operational report destinations. OpenTofu critically denies issuance
+DKIM selectors and the ACME account are explicit reviewed OpenTofu authority
+inputs checked against Stalwart before automatic publication; unrelated names,
+wildcard grants, A, and AAAA are absent. TLSA grants are limited to the five exact enabled public
+TLS listener names. MX, SPF, TLS-only service discovery, Autodiscover, DMARC,
+and TLS-RPT grants are confined to the exact owner/type pairs produced by the
+enabled services. CAA remains absent from the child
+token and owned by OpenTofu, preventing a compromised Stalwart instance from
+redirecting the separate CAA `caa@` destination.
+OpenTofu critically denies issuance
 at the apex and permits only Stalwart's exact Let's Encrypt account via DNS-01
-at `mail`, with an explicit wildcard denial. The `mta-sts` CNAME follows the
-same CAA exception.
+at `mail`, with an explicit wildcard denial. The `mta-sts`, `autoconfig`,
+`autodiscover`, and `ua-auto-config` CNAMEs follow the same CAA exception.
 
 ## Supply-Chain Boundary
 
@@ -386,22 +459,29 @@ image does not currently publish equivalent Sigstore evidence.
   gVisor, namespaces, read-only roots, and explicit mounts instead.
 - PostgreSQL traffic is unencrypted inside the dedicated internal container
   network on one host. Isolation relies on Podman, gVisor, and host integrity.
-- Hetzner backups are not guaranteed to be application-consistent PostgreSQL
-  backups.
+- Hetzner VM snapshots remain crash-consistent secondary recovery aids, not the
+  application-consistent PostgreSQL backup boundary.
+- Hot pgBackRest repositories grow until trusted operator-side expiry runs;
+  only the generated B2 runtime key is technically prevented from deleting.
+- Restore drills and offline recovery-key custody remain operational duties;
+  the repository does not automatically prove that a backup can be restored.
 - Stalwart listener, HTTP, authentication, protocol limits, SMTP throttles,
-  queue quota, SMTP-auth, outbound TLS, Domain, DNS, DKIM, and certificate
+  queue quota, SMTP-auth, outbound TLS, inbound report analysis, Domain, DNS,
+  DKIM, and certificate
   settings are declarative; account lifecycle, mailbox policy, deliverability, and
   reputation controls still require application-level administration.
-- The ignored generated OpenTofu input contains the public ACME account URI and
-  must be refreshed by `make stalwart-bootstrap` if an ACME provider is
-  replaced. The apex CAA policy critically denies TLS, wildcard, S/MIME, and
+- The reviewed controller-authority input contains the public ACME account URI
+  and must be updated explicitly before an ACME provider is replaced. The apex
+  CAA policy critically denies TLS, wildcard, S/MIME, and
   BIMI mark-certificate issuance; the `mail` exception remains TLS-only and
-  account/method-bound. Stalwart cannot change CAA, DMARC, or TLS-RPT with its
-  child token.
+  account/method-bound. Stalwart cannot change CAA with its child token; all of
+  its mail-DNS access is confined to reviewed owner/type pairs.
 - While the automated bootstrap is running, its loopback-only Stalwart endpoint
   is reachable solely through an authenticated SSH local forward restricted to
-  `127.0.0.1:8080`; its exit trap restores the production Quadlet on success or
-  failure.
+  `127.0.0.1:8080`. Enrolled systems map that temporary host port to the
+  hostname-validated TLS listener on 443; only first enrollment maps it to the
+  initial cleartext listener. The exit trap restores the production Quadlet on
+  success or failure.
 - The host has no explicit outbound firewall allowlist.
 - Requiring three authenticated NTS sources improves time integrity but can
   leave the clock unsynchronized during a broad NTS outage.
@@ -412,8 +492,9 @@ image does not currently publish equivalent Sigstore evidence.
   upstream outage prevents the mail containers from starting.
 - Provider compromise, malicious reviewed dependencies, operator compromise,
   and FCOS host-root compromise remain outside the protection gVisor provides.
-- Losing every matching age private identity makes the encrypted secrets
-  unrecoverable.
+- Losing every matching SOPS or cold-backup age identity, the OpenTofu state
+  passphrase, or a pgBackRest repository passphrase makes the corresponding
+  encrypted material unrecoverable.
 
 ## Security Changes
 

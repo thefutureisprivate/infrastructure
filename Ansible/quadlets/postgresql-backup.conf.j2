@@ -1,0 +1,7 @@
+# Preserve the official image's generated PostgreSQL configuration, then add
+# only the WAL archiving settings required for encrypted point-in-time recovery.
+include = '/var/lib/postgresql/18/docker/postgresql.conf'
+
+archive_mode = on
+archive_command = 'pgbackrest --stanza=stalwart archive-push %p'
+archive_timeout = '300s'

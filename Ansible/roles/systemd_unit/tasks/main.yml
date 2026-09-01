@@ -1,0 +1,185 @@
+---
+- name: "Validate systemd unit role inputs on the controller"
+  ansible.builtin.assert:
+    that:
+      - "(systemd_unit_units | type_debug) == 'list'"
+      - "(systemd_unit_absent_units | type_debug) == 'list'"
+      - "systemd_unit_directory is match('^/[A-Za-z0-9_./@+-]+$')"
+      - "systemd_unit_directory != '/'"
+      - "not systemd_unit_directory.endswith('/')"
+      - "'//' not in systemd_unit_directory"
+      - "'/./' not in systemd_unit_directory"
+      - "'/../' not in systemd_unit_directory"
+      - "systemd_unit_systemctl_binary is match('^/[A-Za-z0-9_./@+-]+$')"
+      - "systemd_unit_systemctl_binary != '/'"
+    fail_msg: "systemd unit collections and paths must use safe documented values."
+    quiet: true
+  delegate_to: "localhost"
+  become: false
+
+- name: "Validate desired systemd units on the controller"
+  ansible.builtin.assert:
+    that:
+      - "item is mapping"
+      - "item.name is defined"
+      - "item.name is match('^[A-Za-z0-9_.@-]+\\.(service|timer)$')"
+      - "item.content is defined"
+      - "item.content is string"
+      - "(item.mode | default('0644')) is match('^0[0-7]{3}$')"
+      - "item.enabled | default(false) is boolean"
+      - "item.state | default('none') in ['none', 'started', 'stopped']"
+    fail_msg: "Invalid systemd_unit_units entry: {{ item }}"
+    quiet: true
+  loop: "{{ systemd_unit_units }}"
+  loop_control:
+    label: "{{ item.name | default('unnamed') }}"
+  delegate_to: "localhost"
+  become: false
+
+- name: "Validate absent systemd units on the controller"
+  ansible.builtin.assert:
+    that:
+      - "item is string"
+      - "item is match('^[A-Za-z0-9_.@-]+\\.(service|timer)$')"
+    fail_msg: "Invalid systemd_unit_absent_units entry: {{ item }}"
+    quiet: true
+  loop: "{{ systemd_unit_absent_units }}"
+  delegate_to: "localhost"
+  become: false
+
+- name: "Reject conflicting systemd unit declarations"
+  ansible.builtin.assert:
+    that:
+      - "desired_names | unique | length == desired_names | length"
+      - "systemd_unit_absent_units | unique | length == systemd_unit_absent_units | length"
+      - "desired_names | intersect(systemd_unit_absent_units) | length == 0"
+    fail_msg: "systemd unit declarations contain duplicates or desired/absent conflicts."
+    quiet: true
+  vars:
+    desired_names: "{{ systemd_unit_units | map(attribute='name') | list }}"
+  delegate_to: "localhost"
+  become: false
+
+- name: "Ensure the managed systemd unit directory exists"
+  ansible.builtin.raw: |
+    set -eu
+    destination={{ systemd_unit_directory | quote }}
+    if [ -L "$destination" ] || { [ -e "$destination" ] && [ ! -d "$destination" ]; }; then
+      printf 'Refusing non-directory systemd path: %s\n' "$destination" >&2
+      exit 1
+    fi
+    changed=0
+    if [ ! -d "$destination" ] || [ "$(stat -c '%a:%u:%g' "$destination" 2>/dev/null || :)" != "755:0:0" ]; then
+      changed=1
+    fi
+    install -d -m 0755 -o root -g root "$destination"
+    if [ "$changed" -eq 1 ]; then printf '%s\n' CHANGED; fi
+  register: "systemd_unit_directory_result"
+  changed_when: "'CHANGED' in (systemd_unit_directory_result.stdout_lines | default([]))"
+
+- name: "Disable and remove explicitly absent systemd units"
+  ansible.builtin.raw: |
+    set -eu
+    systemctl_bin={{ systemd_unit_systemctl_binary | quote }}
+    unit={{ item | quote }}
+    destination={{ (systemd_unit_directory ~ '/' ~ item) | quote }}
+    changed=0
+    if "$systemctl_bin" is-active --quiet "$unit"; then
+      "$systemctl_bin" stop "$unit"
+      changed=1
+    fi
+    if "$systemctl_bin" is-enabled --quiet "$unit"; then
+      "$systemctl_bin" disable "$unit"
+      changed=1
+    fi
+    if [ -e "$destination" ] || [ -L "$destination" ]; then
+      rm -f "$destination"
+      changed=1
+    fi
+    if [ "$changed" -eq 1 ]; then printf '%s\n' CHANGED; fi
+  loop: "{{ systemd_unit_absent_units }}"
+  register: "systemd_unit_remove_results"
+  changed_when: "'CHANGED' in (systemd_unit_remove_results.stdout_lines | default([]))"
+
+- name: "Atomically install desired systemd units"
+  ansible.builtin.raw: |
+    set -eu
+    destination={{ (systemd_unit_directory ~ '/' ~ item.name) | quote }}
+    desired_mode={{ item.mode | default('0644') | quote }}
+    if [ -e "$destination" ] && { [ ! -f "$destination" ] || [ -L "$destination" ]; }; then
+      printf 'Refusing unsafe systemd unit path: %s\n' "$destination" >&2
+      exit 1
+    fi
+    temporary="$(mktemp "${destination}.XXXXXX")"
+    trap 'rm -f "$temporary"' EXIT HUP INT TERM
+    printf '%s' {{ item.content | b64encode | quote }} | base64 --decode >"$temporary"
+    chmod "$desired_mode" "$temporary"
+    chown root:root "$temporary"
+    if [ -f "$destination" ] && cmp --silent "$temporary" "$destination" \
+      && [ "$(stat -c '%a:%u:%g' "$destination")" = "${desired_mode#0}:0:0" ]; then
+      exit 0
+    fi
+    mv -f "$temporary" "$destination"
+    trap - EXIT HUP INT TERM
+    printf '%s\n' CHANGED
+  loop: "{{ systemd_unit_units }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: "systemd_unit_write_results"
+  changed_when: "'CHANGED' in (systemd_unit_write_results.stdout_lines | default([]))"
+
+- name: "Reload systemd after managed unit changes"
+  ansible.builtin.raw: "{{ systemd_unit_systemctl_binary | quote }} daemon-reload"
+  when: >-
+    (systemd_unit_remove_results.results | default([]) | selectattr('changed') | list | length > 0)
+    or (systemd_unit_write_results.results | default([]) | selectattr('changed') | list | length > 0)
+  changed_when: false
+
+- name: "Reconcile systemd unit enablement"
+  ansible.builtin.raw: |
+    set -eu
+    systemctl_bin={{ systemd_unit_systemctl_binary | quote }}
+    unit={{ item.name | quote }}
+    desired={{ item.enabled | default(false) | bool | ternary('enabled', 'disabled') | quote }}
+    if [ "$desired" = enabled ]; then
+      if "$systemctl_bin" is-enabled --quiet "$unit"; then exit 0; fi
+      "$systemctl_bin" enable "$unit"
+    else
+      if ! "$systemctl_bin" is-enabled --quiet "$unit"; then exit 0; fi
+      "$systemctl_bin" disable "$unit"
+    fi
+    printf '%s\n' CHANGED
+  loop: "{{ systemd_unit_units }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: "systemd_unit_enable_results"
+  changed_when: "'CHANGED' in (systemd_unit_enable_results.stdout_lines | default([]))"
+
+- name: "Reconcile systemd unit runtime state"
+  ansible.builtin.raw: |
+    set -eu
+    systemctl_bin={{ systemd_unit_systemctl_binary | quote }}
+    unit={{ item.name | quote }}
+    desired={{ item.state | default('none') | quote }}
+    content_changed={{ systemd_unit_write_results.results[unit_index].changed | bool | ternary('yes', 'no') | quote }}
+    if [ "$desired" = started ]; then
+      if [ "$content_changed" = yes ] && "$systemctl_bin" is-active --quiet "$unit"; then
+        "$systemctl_bin" restart "$unit"
+      elif ! "$systemctl_bin" is-active --quiet "$unit"; then
+        "$systemctl_bin" start "$unit"
+      else
+        exit 0
+      fi
+    elif [ "$desired" = stopped ]; then
+      if ! "$systemctl_bin" is-active --quiet "$unit"; then exit 0; fi
+      "$systemctl_bin" stop "$unit"
+    else
+      exit 0
+    fi
+    printf '%s\n' CHANGED
+  loop: "{{ systemd_unit_units }}"
+  loop_control:
+    label: "{{ item.name }}"
+    index_var: "unit_index"
+  register: "systemd_unit_state_results"
+  changed_when: "'CHANGED' in (systemd_unit_state_results.stdout_lines | default([]))"

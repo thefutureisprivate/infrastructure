@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily encrypted pgBackRest repository check
+
+[Timer]
+OnCalendar=*-*-* 05:00:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+FixedRandomDelay=true
+Unit=mail-pgbackrest-check.service
+
+[Install]
+WantedBy=timers.target

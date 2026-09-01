@@ -54,16 +54,38 @@ enable_delete_protection = true
 
 # deSEC is mandatory. The zone must already exist. The SOPS-injected
 # DESEC_API_TOKEN must read it, manage declared records, and mint child tokens.
-desec_domain = "example.com"
+desec_domain = "thefutureisprivate.dev"
 desec_ttl    = 3600
 
-# Initial rollout starts empty. `make stalwart-bootstrap` discovers the exact
-# selectors, writes an ignored generated override, applies only those token
-# policies, and then enables automatic publication. Do not populate this base
-# file; normal plans include the generated override when it exists.
+# The base file remains empty because the exact reviewed selectors live in
+# stalwart-authority.tfvars.json, which every normal plan loads explicitly.
 stalwart_dkim_selectors = []
 
 # The mail node must use a non-apex hostname so reverse DNS can match it.
 desec_node_subnames = {
   "01" = "mail"
 }
+
+# The first apply should keep this false until the encrypted remote backend is
+# bootstrapped and the provider/runtime credentials below are ready.
+mail_backup_storage_enabled = false
+mail_backup_enabled         = false
+
+# The dedicated Hetzner backup project's MINIO_USER/MINIO_PASSWORD pair is
+# synchronized to the mail host and serves both physical and logical backups.
+mail_backup_hetzner_bucket   = "replace-with-a-globally-unique-hetzner-bucket"
+mail_backup_hetzner_location = "nbg1"
+
+# Match the B2 S3 endpoint and region assigned to your Backblaze account.
+mail_backup_b2_bucket   = "replace-with-a-globally-unique-b2-bucket"
+mail_backup_b2_region   = "eu-central-003"
+mail_backup_b2_endpoint = "s3.eu-central-003.backblazeb2.com"
+
+# Use a dedicated Scaleway project containing no unrelated object storage.
+mail_backup_scaleway_bucket     = "replace-with-a-globally-unique-scaleway-bucket"
+mail_backup_scaleway_region     = "fr-par"
+mail_backup_scaleway_project_id = "00000000-0000-0000-0000-000000000000"
+
+# This is public. Keep the matching age private identity offline and test it.
+mail_backup_age_recipient       = "age1replacewiththepublicbackuprecipient0000000000000000000000000"
+mail_backup_cold_retention_days = 400

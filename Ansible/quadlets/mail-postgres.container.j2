@@ -6,20 +6,43 @@ Wants=network-online.target
 After=gvisor-install.service network-online.target
 
 [Container]
+{% if mail_backup_is_enabled | bool %}
+Image={{ mail_postgres_backup_image }}
+Pull=never
+{% else %}
 Image={{ mail_postgres_image }}
 Pull=missing
+{% endif %}
 PodmanArgs=--runtime=runsc
 SecurityLabelDisable=true
 ContainerName=mail-postgres
 Network=mail-postgres.network
+{% if mail_backup_is_enabled | bool %}
+Network=mail-backup-egress.network
+{% endif %}
 NetworkAlias=postgres
 Volume=mail-postgres-data.volume:/var/lib/postgresql
+Volume={{ quadlet_directory }}/mail-postgres-roles.sh:/usr/local/sbin/mail-postgres-roles:ro
+{% if mail_backup_is_enabled | bool %}
+Volume=mail-pgbackrest-state.volume:/var/lib/pgbackrest
+Volume={{ quadlet_directory }}/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+Volume={{ quadlet_directory }}/postgresql-backup.conf:/etc/postgresql-backup.conf:ro
+Secret=mail-backup-hetzner-access-key,type=env,target=PGBACKREST_REPO1_S3_KEY
+Secret=mail-backup-hetzner-secret-key,type=env,target=PGBACKREST_REPO1_S3_KEY_SECRET
+Secret=mail-pgbackrest-repo1-cipher-pass,type=env,target=PGBACKREST_REPO1_CIPHER_PASS
+Secret=mail-pgbackrest-repo2-s3-key,type=env,target=PGBACKREST_REPO2_S3_KEY
+Secret=mail-pgbackrest-repo2-s3-key-secret,type=env,target=PGBACKREST_REPO2_S3_KEY_SECRET
+Secret=mail-pgbackrest-repo2-cipher-pass,type=env,target=PGBACKREST_REPO2_CIPHER_PASS
+Exec=postgres -c config_file=/etc/postgresql-backup.conf
+{% endif %}
+Secret=mail-postgres-admin-password,type=mount,target=postgres-admin-password
 Secret=mail-postgres-password,type=mount,target=postgres-password
+Secret=mail-postgres-dump-password,type=mount,target=postgres-dump-password
 Environment=POSTGRES_DB=stalwart
-Environment=POSTGRES_USER=stalwart
-Environment=POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password
-Environment=POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256
-HealthCmd=pg_isready --username=stalwart --dbname=stalwart
+Environment=POSTGRES_USER=postgres
+Environment=POSTGRES_PASSWORD_FILE=/run/secrets/postgres-admin-password
+Environment=POSTGRES_INITDB_ARGS=--auth-local=trust --auth-host=scram-sha-256
+HealthCmd=pg_isready --host=127.0.0.1 --username=postgres --dbname=stalwart
 HealthInterval=30s
 HealthTimeout=5s
 HealthRetries=5
@@ -35,6 +58,10 @@ Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777
 [Service]
 Restart=always
 RestartSec=5s
+MemoryLow=512M
+CPUWeight=200
+IOWeight=200
+ExecStartPost={{ quadlet_directory }}/mail-postgres-roles.sh
 TimeoutStartSec=900
 TimeoutStopSec=180
 

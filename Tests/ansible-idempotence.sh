@@ -30,12 +30,20 @@ else
   exit 1
 fi
 
-mkdir -p -- "${test_root}/quadlets" "${test_root}/secret-state" "${test_root}/state/bin" "${test_root}/state/services"
+mkdir -p -- "${test_root}/quadlets" "${test_root}/systemd" "${test_root}/secret-state" \
+  "${test_root}/state/bin" "${test_root}/state/services" "${test_root}/state/enabled" "${test_root}/state/secrets"
 install -m 0755 -- "${repo_root}/Tests/ansible/mocks/podman" "${test_root}/state/bin/podman"
 install -m 0755 -- "${repo_root}/Tests/ansible/mocks/systemctl" "${test_root}/state/bin/systemctl"
 printf '%s\n' "obsolete" >"${test_root}/quadlets/retired.container"
-touch -- "${test_root}/state/services/retired.service" "${test_root}/state/mutations.log"
-chmod 0777 "${test_root}/quadlets" "${test_root}/secret-state"
+printf '%s\n' "obsolete" >"${test_root}/quadlets/retired.conf"
+printf '%s\n' "obsolete" >"${test_root}/state/secrets/retired-secret"
+printf '%s\n' "obsolete" >"${test_root}/secret-state/retired-secret.sha256"
+printf '%s\n' "obsolete" >"${test_root}/state/secrets/retired-secret-without-dependents"
+printf '%s\n' "obsolete" >"${test_root}/secret-state/retired-secret-without-dependents.sha256"
+printf '%s\n' "obsolete" >"${test_root}/systemd/retired-backup.timer"
+touch -- "${test_root}/state/services/retired.service" "${test_root}/state/services/retired-backup.timer" \
+  "${test_root}/state/enabled/retired-backup.timer" "${test_root}/state/mutations.log"
+chmod 0777 "${test_root}/quadlets" "${test_root}/systemd" "${test_root}/secret-state"
 
 run_playbook() {
   ANSIBLE_CONFIG="${repo_root}/Ansible/ansible.cfg" \

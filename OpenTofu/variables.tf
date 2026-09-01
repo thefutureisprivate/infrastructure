@@ -148,25 +148,18 @@ variable "enable_delete_protection" {
 }
 
 variable "desec_domain" {
-  description = "Existing deSEC zone whose host records and scoped Stalwart token are managed by this stack."
+  description = "Existing deSEC zone managed by this single-domain stack. Security-report recipients and reviewed mail authority are intentionally bound to thefutureisprivate.dev."
   type        = string
   nullable    = false
 
   validation {
-    condition = (
-      length(var.desec_domain) <= 253 &&
-      length(split(".", var.desec_domain)) >= 2 &&
-      alltrue([
-        for label in split(".", var.desec_domain) :
-        length(label) <= 63 && can(regex("^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", label))
-      ])
-    )
-    error_message = "desec_domain must be a valid Punycode DNS zone name without a trailing dot."
+    condition     = var.desec_domain == "thefutureisprivate.dev"
+    error_message = "desec_domain must be thefutureisprivate.dev; this stack's security-report recipients and mail authority are intentionally domain-specific."
   }
 }
 
 variable "stalwart_dkim_selectors" {
-  description = "Exact active or retiring Stalwart DKIM selector labels authorized in deSEC. The automated bootstrap supplies these through an ignored generated variable file."
+  description = "Exact reviewed active or retiring Stalwart DKIM selector labels authorized in deSEC. Normal plans load them from stalwart-authority.tfvars.json."
   type        = set(string)
   default     = []
 
@@ -180,7 +173,7 @@ variable "stalwart_dkim_selectors" {
 }
 
 variable "stalwart_acme_account_uri" {
-  description = "Exact staging or production ACME account URI discovered from Stalwart by the automated bootstrap. Null keeps the mail CAA exception absent and the apex deny policy effective."
+  description = "Reviewed production ACME account URI. Bootstrap compares Stalwart to this controller-owned value before changing CAA."
   type        = string
   default     = null
   nullable    = true
@@ -191,6 +184,21 @@ variable "stalwart_acme_account_uri" {
       can(regex("^https://acme(-staging)?-v02[.]api[.]letsencrypt[.]org/acme/acct/[0-9]+$", var.stalwart_acme_account_uri))
     )
     error_message = "stalwart_acme_account_uri must be null or an exact Let's Encrypt staging or production ACME account URI."
+  }
+}
+
+variable "stalwart_staging_acme_account_uri" {
+  description = "Reviewed staging ACME account URI used only during an explicitly approved first enrollment."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.stalwart_staging_acme_account_uri == null ||
+      can(regex("^https://acme-staging-v02[.]api[.]letsencrypt[.]org/acme/acct/[0-9]+$", var.stalwart_staging_acme_account_uri))
+    )
+    error_message = "stalwart_staging_acme_account_uri must be null or an exact reviewed Let's Encrypt staging account URI."
   }
 }
 
@@ -218,5 +226,133 @@ variable "desec_node_subnames" {
       subname == "@" || can(regex("^[A-Za-z0-9_*-]+(\\.[A-Za-z0-9_*-]+)*$", subname))
     ])
     error_message = "deSEC subnames must be @ or dot-separated DNS labels."
+  }
+}
+
+variable "mail_backup_storage_enabled" {
+  description = "Keep the protected three-provider mail backup storage declared independently of host runtime access and schedules."
+  type        = bool
+}
+
+variable "mail_backup_enabled" {
+  description = "Create runtime backup identities and publish host schedules; requires durable storage and an age recipient."
+  type        = bool
+  default     = false
+
+  validation {
+    condition = !var.mail_backup_enabled || (
+      var.mail_backup_storage_enabled && var.mail_backup_age_recipient != ""
+    )
+    error_message = "mail_backup_enabled requires mail_backup_storage_enabled and mail_backup_age_recipient; disable runtime while leaving storage enabled to pause backups safely."
+  }
+}
+
+variable "mail_backup_hetzner_bucket" {
+  description = "Globally unique Hetzner Object Storage bucket for the first encrypted pgBackRest repository."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.mail_backup_hetzner_bucket == "" || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.mail_backup_hetzner_bucket))
+    error_message = "mail_backup_hetzner_bucket must be empty or a valid lowercase S3 bucket name."
+  }
+}
+
+variable "mail_backup_hetzner_location" {
+  description = "Hetzner Object Storage location used for the first hot repository."
+  type        = string
+  default     = "nbg1"
+
+  validation {
+    condition     = contains(["fsn1", "nbg1", "hel1"], var.mail_backup_hetzner_location)
+    error_message = "mail_backup_hetzner_location must be fsn1, nbg1, or hel1."
+  }
+}
+
+variable "mail_backup_b2_bucket" {
+  description = "Globally unique Backblaze B2 bucket for the second encrypted pgBackRest repository."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.mail_backup_b2_bucket == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9-]{4,48}[A-Za-z0-9]$", var.mail_backup_b2_bucket))
+    error_message = "mail_backup_b2_bucket must be empty or a valid 6-50 character B2 bucket name."
+  }
+}
+
+variable "mail_backup_b2_region" {
+  description = "Backblaze B2 S3 region assigned to the account."
+  type        = string
+  default     = "eu-central-003"
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]+$", var.mail_backup_b2_region))
+    error_message = "mail_backup_b2_region must be a lowercase S3 region identifier."
+  }
+}
+
+variable "mail_backup_b2_endpoint" {
+  description = "Backblaze B2 S3 endpoint hostname without a URL scheme."
+  type        = string
+  default     = "s3.eu-central-003.backblazeb2.com"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9.-]+[.]backblazeb2[.]com$", var.mail_backup_b2_endpoint))
+    error_message = "mail_backup_b2_endpoint must be a Backblaze S3 endpoint hostname without a scheme."
+  }
+}
+
+variable "mail_backup_scaleway_bucket" {
+  description = "Globally unique Scaleway Object Storage bucket for age-encrypted logical archives."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.mail_backup_scaleway_bucket == "" || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.mail_backup_scaleway_bucket))
+    error_message = "mail_backup_scaleway_bucket must be empty or a valid lowercase S3 bucket name."
+  }
+}
+
+variable "mail_backup_scaleway_region" {
+  description = "Paris region used for the Scaleway Glacier cold archive."
+  type        = string
+  default     = "fr-par"
+
+  validation {
+    condition     = var.mail_backup_scaleway_region == "fr-par"
+    error_message = "mail_backup_scaleway_region must be fr-par."
+  }
+}
+
+variable "mail_backup_scaleway_project_id" {
+  description = "Dedicated Scaleway project containing only the cold backup bucket."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.mail_backup_scaleway_project_id == "" || can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.mail_backup_scaleway_project_id))
+    error_message = "mail_backup_scaleway_project_id must be empty or a lowercase UUID."
+  }
+}
+
+variable "mail_backup_age_recipient" {
+  description = "Public age recipient used on the mail host; its private identity must exist only in tested offline custody."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.mail_backup_age_recipient == "" || can(regex("^age1[0-9a-z]{40,}$", var.mail_backup_age_recipient))
+    error_message = "mail_backup_age_recipient must be empty or a valid native age recipient."
+  }
+}
+
+variable "mail_backup_cold_retention_days" {
+  description = "Immutable retention and eventual expiry for age-encrypted Scaleway archives."
+  type        = number
+  default     = 400
+
+  validation {
+    condition     = var.mail_backup_cold_retention_days >= 90 && var.mail_backup_cold_retention_days <= 3650 && floor(var.mail_backup_cold_retention_days) == var.mail_backup_cold_retention_days
+    error_message = "mail_backup_cold_retention_days must be an integer between 90 and 3650."
   }
 }

@@ -4,18 +4,21 @@ All secret-management configuration, encrypted files, safe examples, and
 helper scripts live in this directory. The two secret scopes are deliberately
 separate:
 
-- `infrastructure.sops.yaml` supplies `HCLOUD_TOKEN` and a deSEC bootstrap
-  `DESEC_API_TOKEN` only to OpenTofu and the direct FCOS Rescue installer. The
-  deSEC token reads the existing zone, manages the mail host records, and
-  needs token-management permission so OpenTofu can mint the restricted
-  Stalwart child token.
-- `mail.sops.yaml` starts with `MAIL_POSTGRES_PASSWORD`. After `make apply`, it
-  also contains the generated `STALWART_DESEC_API_TOKEN`. Ansible converts
-  those two values into rootful Podman secrets on the FCOS host; neither is
-  rendered into a Quadlet or Stalwart's configuration file. The same encrypted
-  scope later holds `STALWART_CONFIG_API_TOKEN`, which is passed only to the
-  local declarative hardening client and is never deployed to the server as a
-  Podman secret.
+- `infrastructure.sops.yaml` supplies `HCLOUD_TOKEN`, the deSEC bootstrap
+  `DESEC_API_TOKEN`, operator-side Hetzner/B2/Scaleway object-storage
+  credentials, and `TOFU_STATE_PASSPHRASE` to scoped children. The B2 and
+  Scaleway provider credentials remain operator-side and mint restricted
+  runtime identities. The Hetzner pair is also synchronized to the mail scope
+  for its dedicated mutable backup bucket.
+- `mail.sops.yaml` starts with independent PostgreSQL administrator,
+  application, and read-only dump passwords. After `make apply`, it also
+  contains the generated `STALWART_DESEC_API_TOKEN`, bucket-scoped B2 keys,
+  write-only Scaleway cold-archive key, synchronized Hetzner pair, and two
+  independent pgBackRest cipher passphrases.
+  Ansible converts deployed values into rootful Podman secrets; none is
+  rendered into a Quadlet or Stalwart configuration file. The same encrypted
+  scope holds `STALWART_CONFIG_API_TOKEN`, which is passed only to the local
+  declarative hardening client and is never deployed as a Podman secret.
 
 OpenTofu creates Stalwart's deSEC token with a default-deny policy. Its writes
 are limited to exact reviewed mail owner-name/type pairs and declared DKIM
@@ -38,11 +41,12 @@ The `*.example.yaml` files remain as non-secret references and for bootstrapping
 a fresh environment. The current secret scopes are already initialized; the
 `sops-*-init` Make targets refuse to overwrite them.
 
-`make apply` creates the Stalwart token and immediately writes it to
-`mail.sops.yaml` through `sops set --value-stdin`. The token is never placed in
-a command-line argument or plaintext temporary file. Run
-`make sops-mail-sync-desec` to retry this synchronization without reapplying
-infrastructure.
+`make apply` creates the Stalwart token and generated runtime backup identities,
+then synchronizes them together with the Hetzner pair into `mail.sops.yaml`.
+Secrets are never placed in command-line arguments or plaintext files; the
+backup synchronizer retains its sensitive JSON only in shell memory. Run
+`make sops-mail-sync-desec` or `make sops-mail-sync-backup` to retry one
+synchronization without reapplying infrastructure.
 
 After the permanent Stalwart HTTPS listener works, create the API key described
 in `Documentation/Stalwart.md` and store its one-time secret with
@@ -50,8 +54,8 @@ in `Documentation/Stalwart.md` and store its one-time secret with
 `make stalwart-harden` and `make stalwart-audit` decrypt it directly into the
 pinned, read-only Stalwart CLI container. The key uses `Replace` permission
 mode with only the baseline `authenticate` permission and the listener, HTTP,
-inbound SMTP throttle, SMTP-auth, MTA-STS, and settings-reload permissions
-required by the committed plan.
+inbound SMTP throttle, SMTP-auth, MTA-STS, DNS-resolver, and settings-reload
+permissions required by the committed plan.
 
 `make stalwart-bootstrap` separately generates a fresh 256-bit recovery
 password. A direct CLI runtime receives it only in the scoped child environment;
@@ -61,15 +65,24 @@ trap restarts the production Quadlet without the recovery environment before
 removing both secrets. If that restart fails, it preserves and reports the
 server secret until `make deploy` succeeds rather than falsely treating the
 still-active recovery credential as revoked. The workflow decrypts the infrastructure scope solely
-for a targeted update of the exact generated DKIM token policies; the recovery
+for a targeted update of the exact reviewed DKIM token policies; the recovery
 password is never added to either SOPS file, a command argument, or a regular
-file. The generated selector variable file contains DNS labels, not secrets,
-and remains ignored to avoid environment-specific configuration drift in Git.
+file. DKIM selectors and ACME account URIs are non-secret authorization inputs
+committed in `OpenTofu/stalwart-authority.tfvars.json` for review.
 
-The generated token is retained in OpenTofu state so it can be synchronized
-again. Use an encrypted remote backend with tightly restricted access before
-sharing or automating this stack; marking an output sensitive only suppresses
-normal CLI display and does not encrypt state.
+Generated credentials are retained in OpenTofu state so they can be synchronized
+again. `Scripts/tofu.sh` derives an AES-GCM key from
+`TOFU_STATE_PASSPHRASE`; normal wrapper mode enforces encrypted state and
+plans for both roots. The remote Scaleway bucket is versioned, while its backend
+credentials remain environment-only. There is no plaintext state compatibility
+path. Preserve the state passphrase offline: the remote objects are
+unrecoverable without it. Timestamped local state recovery copies are wrapped
+independently with SOPS/age and can be restored through `make
+tofu-state-restore` after recreating the empty backend.
+
+The cold-backup age identity is a separate recovery authority. The mail host
+receives only its public recipient. Keep the private identity offline and test
+it quarterly together with both independent pgBackRest cipher passphrases.
 
 The public recipient policy is committed in `SOPS/config.yaml`. Its private age
 identity is stored at `~/.config/sops/age/keys.txt`, SOPS's standard user path.

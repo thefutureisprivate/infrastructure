@@ -6,7 +6,7 @@ if [[ ${arguments} == *' output -json fcos_install_targets '* ]]; then
   if [[ ${FCOS_TEST_EMPTY_TARGETS:-0} == 1 ]]; then
     printf '{}\n'
   else
-    printf '%s\n' '{"01":{"id":101,"name":"mail-01","address":"192.0.2.10","api_address":"192.0.2.10","architecture":"x86_64"}}'
+    printf '%s\n' '{"01":{"id":101,"name":"mail-01","address":"192.0.2.10","api_address":"192.0.2.10","fqdn":"mail.thefutureisprivate.dev","architecture":"x86_64"}}'
   fi
 elif [[ ${arguments} == *' output -raw rescue_ssh_key_id '* ]]; then
   printf '99'

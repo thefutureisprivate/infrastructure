@@ -4,8 +4,9 @@ set -euo pipefail
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 state_root=$(cd -- "${script_dir}/.." && pwd)
 service_directory="${state_root}/services"
+enabled_directory="${state_root}/enabled"
 mutation_log="${state_root}/mutations.log"
-mkdir -p -- "${service_directory}"
+mkdir -p -- "${service_directory}" "${enabled_directory}"
 
 case ${1:-} in
   is-active)
@@ -26,6 +27,21 @@ case ${1:-} in
   restart)
     touch -- "${service_directory}/${2:?}"
     printf 'systemctl restart %s\n' "$2" >>"${mutation_log}"
+    ;;
+  is-enabled)
+    shift
+    if [[ ${1:-} == "--quiet" ]]; then
+      shift
+    fi
+    [[ -f "${enabled_directory}/${1:?}" ]]
+    ;;
+  enable)
+    touch -- "${enabled_directory}/${2:?}"
+    printf 'systemctl enable %s\n' "$2" >>"${mutation_log}"
+    ;;
+  disable)
+    rm -f -- "${enabled_directory}/${2:?}"
+    printf 'systemctl disable %s\n' "$2" >>"${mutation_log}"
     ;;
   daemon-reload)
     printf '%s\n' "systemctl daemon-reload" >>"${mutation_log}"

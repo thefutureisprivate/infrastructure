@@ -163,6 +163,16 @@ storage:
           [main]
           dns=none
           systemd-resolved=false
+    - path: /etc/systemd/zram-generator.conf
+      mode: 0644
+      user:
+        name: root
+      group:
+        name: root
+      contents:
+        inline: |
+          [zram0]
+          zram-size = ram / 2
     - path: /etc/systemd/resolved.conf.d/60-fcos-encrypted-dns.conf
       mode: 0644
       user:

@@ -42,10 +42,27 @@ jobs:
         run: "tofu -chdir=OpenTofu fmt -check -recursive"
 
       - name: "Initialize OpenTofu without a backend"
-        run: "tofu -chdir=OpenTofu init -backend=false"
+        env:
+          TOFU_STATE_PASSPHRASE: "ci-validation-only-passphrase-32-characters"
+        run: "./Scripts/tofu.sh -chdir=OpenTofu init -backend=false"
 
       - name: "Validate OpenTofu"
-        run: "tofu -chdir=OpenTofu validate"
+        env:
+          TOFU_STATE_PASSPHRASE: "ci-validation-only-passphrase-32-characters"
+        run: "./Scripts/tofu.sh -chdir=OpenTofu validate"
+
+      - name: "Test OpenTofu input invariants"
+        run: "Tests/tofu-mail-backup-flags.sh"
+
+      - name: "Validate remote-state bootstrap OpenTofu"
+        env:
+          TOFU_STATE_PASSPHRASE: "ci-validation-only-passphrase-32-characters"
+        run: |
+          ./Scripts/tofu.sh -chdir=OpenTofu/bootstrap init -backend=false
+          ./Scripts/tofu.sh -chdir=OpenTofu/bootstrap validate
+
+      - name: "Verify OpenTofu state encryption migration"
+        run: "Tests/tofu-encryption.sh"
 
       - name: "Install Python tooling"
         uses: "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"  # v7.0.0
@@ -70,8 +87,31 @@ jobs:
       - name: "Verify SOPS environment allowlists"
         run: "Tests/sops-allowlist.sh"
 
+      - name: "Verify exact backup credential synchronization"
+        run: "Tests/sops-sync-backup-credentials.sh"
+
+      - name: "Verify OpenTofu backend credential isolation"
+        run: "Tests/tofu-wrapper-environment.sh"
+
+      - name: "Verify encrypted local OpenTofu state snapshots"
+        run: "Tests/tofu-state-snapshot.sh"
+
+      - name: "Verify encrypted local OpenTofu state restore"
+        run: "Tests/tofu-state-restore.sh"
+
+      - name: "Verify PostgreSQL password isolation guard"
+        run: "Tests/mail-postgres-passwords.sh"
+
+      - name: "Verify PostgreSQL role separation and migration"
+        env:
+          POSTGRES_ROLES_PULL: "1"
+        run: "Tests/postgres-roles.sh"
+
       - name: "Verify direct FCOS rescue installer guards"
         run: "Tests/fcos-rescue-installer.sh"
+
+      - name: "Verify encrypted mail backup invariants"
+        run: "Tests/mail-backups.sh"
 
       - name: "Validate Stalwart hardening plan"
         run: "bash Scripts/check-stalwart-hardening-plan.sh"

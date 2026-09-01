@@ -15,33 +15,57 @@ locals {
     if var.nodes[key].ipv6
   }
 
-  # deSEC token policies match exact owner names. Keep this list aligned with
-  # the reviewed Stalwart v0.16.19 zone output; never replace it with a
-  # type-only or wildcard policy. For token policies, an empty subname is the
-  # exact zone apex; null would broaden the grant to every subname.
+  # The runtime token is deliberately restricted to records whose content has
+  # a dynamic lifecycle inside Stalwart. The MTA-STS and modern autoconfig
+  # publication switches each reconcile a CNAME together with their dynamic
+  # TXT record, so those two exact aliases are authorized as atomic feature
+  # bundles while OpenTofu continues to assert their canonical targets.
+  # Mail routing, SPF, service discovery, DMARC, and TLS-RPT are generated from
+  # Stalwart's live Domain/SystemSettings model. Each grant is still confined
+  # to the exact owner name and record type that the enabled features emit.
+  # For token policies, an empty subname is the exact zone apex; null would
+  # broaden the grant to every subname.
   stalwart_desec_record_policies = merge({
-    apex_mx                   = { subname = "", type = "MX" }
-    apex_spf                  = { subname = "", type = "TXT" }
-    mail_spf                  = { subname = local.mail_subname, type = "TXT" }
-    dane_smtp                 = { subname = "_25._tcp.${local.mail_subname}", type = "TLSA" }
-    dane_https                = { subname = "_443._tcp.${local.mail_subname}", type = "TLSA" }
-    dane_submissions          = { subname = "_465._tcp.${local.mail_subname}", type = "TLSA" }
-    dane_imaps                = { subname = "_993._tcp.${local.mail_subname}", type = "TLSA" }
-    dane_mta_sts_https        = { subname = "_443._tcp.mta-sts", type = "TLSA" }
-    mta_sts_alias             = { subname = "mta-sts", type = "CNAME" }
-    mta_sts_policy            = { subname = "_mta-sts", type = "TXT" }
-    user_agent_autoconfig     = { subname = "ua-auto-config", type = "CNAME" }
-    user_agent_autoconfig_txt = { subname = "_ua-auto-config", type = "TXT" }
-    autodiscover              = { subname = "autodiscover", type = "CNAME" }
-    jmap_service              = { subname = "_jmap._tcp", type = "SRV" }
-    caldav_service            = { subname = "_caldavs._tcp", type = "SRV" }
-    carddav_service           = { subname = "_carddavs._tcp", type = "SRV" }
-    imaps_service             = { subname = "_imaps._tcp", type = "SRV" }
-    submissions_service       = { subname = "_submissions._tcp", type = "SRV" }
-    apex_acme_challenge       = { subname = "_acme-challenge", type = "TXT" }
-    mail_acme_challenge       = { subname = "_acme-challenge.${local.mail_subname}", type = "TXT" }
-    mta_sts_acme_challenge    = { subname = "_acme-challenge.mta-sts", type = "TXT" }
-    acme_validation_persist   = { subname = "_validation-persist", type = "TXT" }
+    dane_smtp              = { subname = "_25._tcp.${local.mail_subname}", type = "TLSA" }
+    dane_https             = { subname = "_443._tcp.${local.mail_subname}", type = "TLSA" }
+    dane_submissions       = { subname = "_465._tcp.${local.mail_subname}", type = "TLSA" }
+    dane_imaps             = { subname = "_993._tcp.${local.mail_subname}", type = "TLSA" }
+    dane_mta_sts_https     = { subname = "_443._tcp.mta-sts", type = "TLSA" }
+    mta_sts_policy         = { subname = "_mta-sts", type = "TXT" }
+    mta_sts_alias          = { subname = "mta-sts", type = "CNAME" }
+    user_agent_config_hash = { subname = "_ua-auto-config", type = "TXT" }
+    user_agent_autoconfig_alias = {
+      subname = "ua-auto-config"
+      type    = "CNAME"
+    }
+    apex_mx                = { subname = "", type = "MX" }
+    apex_spf               = { subname = "", type = "TXT" }
+    mail_spf               = { subname = local.mail_subname, type = "TXT" }
+    autodiscover_alias     = { subname = "autodiscover", type = "CNAME" }
+    jmap_service           = { subname = "_jmap._tcp", type = "SRV" }
+    caldav_service         = { subname = "_caldavs._tcp", type = "SRV" }
+    carddav_service        = { subname = "_carddavs._tcp", type = "SRV" }
+    imaps_service          = { subname = "_imaps._tcp", type = "SRV" }
+    submissions_service    = { subname = "_submissions._tcp", type = "SRV" }
+    legacy_autoconfig      = { subname = "autoconfig", type = "CNAME" }
+    dmarc                  = { subname = "_dmarc", type = "TXT" }
+    tls_reporting          = { subname = "_smtp._tls", type = "TXT" }
+    apex_acme_challenge    = { subname = "_acme-challenge", type = "TXT" }
+    mail_acme_challenge    = { subname = "_acme-challenge.${local.mail_subname}", type = "TXT" }
+    mta_sts_acme_challenge = { subname = "_acme-challenge.mta-sts", type = "TXT" }
+    autoconfig_acme_challenge = {
+      subname = "_acme-challenge.autoconfig"
+      type    = "TXT"
+    }
+    autodiscover_acme_challenge = {
+      subname = "_acme-challenge.autodiscover"
+      type    = "TXT"
+    }
+    user_agent_autoconfig_acme_challenge = {
+      subname = "_acme-challenge.ua-auto-config"
+      type    = "TXT"
+    }
+    acme_validation_persist = { subname = "_validation-persist", type = "TXT" }
     }, {
     for selector in var.stalwart_dkim_selectors :
     "dkim_${selector}" => {
@@ -64,7 +88,9 @@ data "desec_domain" "fcos" {
 
 # Deny TLS, wildcard TLS, S/MIME, and BIMI mark-certificate issuance at the
 # zone apex. The mail host has its own narrower CAA RRset below, so every
-# certificate class must also be stated explicitly there.
+# certificate class must also be stated explicitly there. CAA lookup for the
+# controller-owned discovery aliases and Stalwart-managed legacy autoconfig
+# alias follows their mail CNAME target and therefore uses the mail RRset.
 resource "desec_rrset" "apex_caa" {
   domain  = local.desec_zone_name
   subname = "@"
@@ -79,9 +105,8 @@ resource "desec_rrset" "apex_caa" {
   ]
 }
 
-# The ACME account URI is generated by Stalwart when its provider is created,
-# then written to the ignored bootstrap variable file. CAA lookup for the
-# mta-sts CNAME follows its mail target and therefore uses this same RRset.
+# Stalwart generates the ACME account URI when registering its provider. The
+# reviewed value is committed in stalwart-authority.tfvars.json.
 resource "desec_rrset" "mail_caa" {
   count = var.stalwart_acme_account_uri == null ? 0 : 1
 

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ ${AWS_ACCESS_KEY_ID:-} == 'scaleway-access-key' ]]
+[[ ${AWS_SECRET_ACCESS_KEY:-} == 'scaleway-secret-key' ]]
+[[ -z ${AWS_SESSION_TOKEN+x} ]]
+[[ ${MINIO_USER:-} == 'hetzner-access-key' ]]
+[[ ${MINIO_PASSWORD:-} == 'hetzner-secret-key' ]]
+[[ ${TF_ENCRYPTION:-} == *'method "aes_gcm" "infrastructure_state"'* ]]

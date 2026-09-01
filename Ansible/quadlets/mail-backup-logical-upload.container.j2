@@ -1,0 +1,53 @@
+[Unit]
+Description=Upload authenticated encrypted logical backup to all three providers
+Requires=gvisor-install.service
+After=gvisor-install.service network-online.target
+
+[Container]
+Image={{ mail_postgres_backup_image }}
+Pull=never
+PodmanArgs=--runtime=runsc
+SecurityLabelDisable=true
+ContainerName=mail-backup-logical-upload
+Network=mail-backup-egress.network
+Volume=mail-backup-staging.volume:/backup:U
+Volume={{ quadlet_directory }}/mail-backup-upload.sh:/usr/local/sbin/mail-backup-upload:ro
+Secret=mail-backup-scaleway-access-key,type=env,target=RCLONE_CONFIG_SCALEWAY_ACCESS_KEY_ID
+Secret=mail-backup-scaleway-secret-key,type=env,target=RCLONE_CONFIG_SCALEWAY_SECRET_ACCESS_KEY
+Secret=mail-backup-hetzner-access-key,type=env,target=RCLONE_CONFIG_HETZNER_ACCESS_KEY_ID
+Secret=mail-backup-hetzner-secret-key,type=env,target=RCLONE_CONFIG_HETZNER_SECRET_ACCESS_KEY
+Secret=mail-backup-b2-access-key,type=env,target=RCLONE_CONFIG_BACKBLAZE_ACCESS_KEY_ID
+Secret=mail-backup-b2-secret-key,type=env,target=RCLONE_CONFIG_BACKBLAZE_SECRET_ACCESS_KEY
+Secret=mail-backup-signing-public-key,type=mount,target=mail-backup-signing-public-key
+Environment=RCLONE_CONFIG_HETZNER_TYPE=s3
+Environment=RCLONE_CONFIG_HETZNER_PROVIDER=Other
+Environment=RCLONE_CONFIG_HETZNER_ENV_AUTH=false
+Environment=RCLONE_CONFIG_HETZNER_REGION={{ mail_backup_hetzner_region }}
+Environment=RCLONE_CONFIG_HETZNER_ENDPOINT=https://{{ mail_backup_hetzner_endpoint }}
+Environment=RCLONE_CONFIG_BACKBLAZE_TYPE=s3
+Environment=RCLONE_CONFIG_BACKBLAZE_PROVIDER=Other
+Environment=RCLONE_CONFIG_BACKBLAZE_ENV_AUTH=false
+Environment=RCLONE_CONFIG_BACKBLAZE_REGION={{ mail_backup_b2_region }}
+Environment=RCLONE_CONFIG_BACKBLAZE_ENDPOINT=https://{{ mail_backup_b2_endpoint }}
+Environment=RCLONE_CONFIG_SCALEWAY_TYPE=s3
+Environment=RCLONE_CONFIG_SCALEWAY_PROVIDER=Scaleway
+Environment=RCLONE_CONFIG_SCALEWAY_ENV_AUTH=false
+Environment=RCLONE_CONFIG_SCALEWAY_REGION={{ mail_backup_scaleway_region }}
+Environment=RCLONE_CONFIG_SCALEWAY_ENDPOINT={{ mail_backup_scaleway_endpoint }}
+Environment=MAIL_BACKUP_SCALEWAY_BUCKET={{ mail_backup_scaleway_bucket }}
+Environment=MAIL_BACKUP_HETZNER_BUCKET={{ mail_backup_hetzner_bucket }}
+Environment=MAIL_BACKUP_B2_BUCKET={{ mail_backup_b2_bucket }}
+Environment=HOME=/tmp
+Exec=/usr/local/sbin/mail-backup-upload
+User=70:70
+NoNewPrivileges=true
+DropCapability=all
+ReadOnly=true
+RunInit=true
+Tmpfs=/tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777
+
+[Service]
+Type=oneshot
+UMask=0077
+TimeoutStartSec=21600
+TimeoutStopSec=300

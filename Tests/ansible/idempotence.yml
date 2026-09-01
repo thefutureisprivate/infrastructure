@@ -10,6 +10,8 @@
     quadlet_secret_state_directory: "{{ test_root }}/secret-state"
     quadlet_podman_binary: "{{ test_root }}/state/bin/podman"
     quadlet_systemctl_binary: "{{ test_root }}/state/bin/systemctl"
+    systemd_unit_directory: "{{ test_root }}/systemd"
+    systemd_unit_systemctl_binary: "{{ test_root }}/state/bin/systemctl"
     quadlet_secrets:
       - name: "test-secret"
         value: |-
@@ -25,6 +27,10 @@
           - "test.service"
         content: |
           setting=true
+    quadlet_absent_support_files:
+      - name: "retired.conf"
+        services:
+          - "test.service"
     quadlet_units:
       - name: "test.network"
         services:
@@ -41,6 +47,28 @@
     quadlet_absent_units:
       - name: "retired.container"
         service: "retired.service"
+    quadlet_absent_secrets:
+      - name: "retired-secret"
+        services:
+          - "test.service"
+      - name: "retired-secret-without-dependents"
+    systemd_unit_units:
+      - name: "test-backup.service"
+        enabled: false
+        state: "none"
+        content: |
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/bin/true
+      - name: "test-backup.timer"
+        enabled: true
+        state: "started"
+        content: |
+          [Timer]
+          OnCalendar=daily
+    systemd_unit_absent_units:
+      - "retired-backup.timer"
 
   roles:
     - role: "quadlet"
+    - role: "systemd_unit"

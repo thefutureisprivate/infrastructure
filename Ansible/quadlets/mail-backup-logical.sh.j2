@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+set -o noclobber
+umask 077
+
+staging_directory=${MAIL_BACKUP_STAGING_DIRECTORY:-/backup}
+private_key=${MAIL_BACKUP_SIGNING_PRIVATE_KEY_FILE:-/run/secrets/mail-backup-signing-private-key}
+public_key=${MAIL_BACKUP_SIGNING_PUBLIC_KEY_FILE:-/run/secrets/mail-backup-signing-public-key}
+ciphertext="${staging_directory}/backup.dump.age"
+manifest="${staging_directory}/manifest.json"
+signature="${staging_directory}/manifest.sig"
+backup_complete=false
+
+cleanup_incomplete_backup() {
+  local status=$?
+  trap - EXIT
+  if [[ ${backup_complete} != true ]]; then
+    rm -f -- "${ciphertext}" "${manifest}" "${signature}"
+  fi
+  exit "${status}"
+}
+
+if [[ -e ${ciphertext} || -L ${ciphertext} || \
+      -e ${manifest} || -L ${manifest} || \
+      -e ${signature} || -L ${signature} ]]; then
+  printf 'Signed backup staging is not empty; run the uploader before creating another archive.\n' >&2
+  exit 1
+fi
+trap cleanup_incomplete_backup EXIT
+
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+nonce=$(openssl rand -hex 16)
+archive_name="stalwart-${timestamp}-${nonce}.dump.age"
+scaleway_object="logical/${archive_name}"
+hot_object="stalwart/signed-logical/${archive_name}"
+
+# No plaintext file is created. The signing container has the database reader
+# and signing key but no object-storage credential or egress network.
+pg_dump \
+  --host=postgres \
+  --username=stalwart_dump \
+  --dbname=stalwart \
+  --format=custom \
+  --compress=zstd:9 \
+  --no-password \
+  | age --encrypt --recipient "${MAIL_BACKUP_AGE_RECIPIENT}" \
+      >"${ciphertext}"
+
+digest=$(sha256sum "${ciphertext}" | awk '{print $1}')
+bytes=$(stat --format=%s "${ciphertext}")
+signing_key_id=$(openssl pkey -pubin -in "${public_key}" -outform DER |
+  sha256sum | awk '{print $1}')
+[[ ${signing_key_id} =~ ^[0-9a-f]{64}$ ]]
+jq --null-input --compact-output --sort-keys \
+  --arg bucket "${MAIL_BACKUP_SCALEWAY_BUCKET}" \
+  --arg scaleway_object "${scaleway_object}" \
+  --arg hot_object "${hot_object}" \
+  --arg hetzner_bucket "${MAIL_BACKUP_HETZNER_BUCKET}" \
+  --arg b2_bucket "${MAIL_BACKUP_B2_BUCKET}" \
+  --arg timestamp "${timestamp}" \
+  --arg sha256 "${digest}" \
+  --arg signing_key_id "${signing_key_id}" \
+  --argjson bytes "${bytes}" \
+  '{version: 2, signingKeyId: $signing_key_id,
+    timestamp: $timestamp, sha256: $sha256, bytes: $bytes,
+    destinations: {
+      hetzner: {bucket: $hetzner_bucket, object: $hot_object},
+      backblaze: {bucket: $b2_bucket, object: $hot_object},
+      scaleway: {bucket: $bucket, object: $scaleway_object}
+    }}' \
+  >"${manifest}"
+
+openssl pkeyutl -sign -rawin -inkey "${private_key}" \
+  -in "${manifest}" -out "${signature}"
+openssl pkeyutl -verify -rawin -pubin -inkey "${public_key}" \
+  -in "${manifest}" -sigfile "${signature}" >/dev/null
+
+backup_complete=true
+printf 'Created signed encrypted logical backup: %s\n' "${archive_name}"
