@@ -7,7 +7,7 @@ The operator workstation needs:
 - GNU Make and Bash;
 - OpenTofu matching `.opentofu-version`;
 - SOPS and an age identity matching `SOPS/config.yaml`;
-- Ansible Core 2.20;
+- Ansible Core 2.21;
 - `jq`, `curl`, OpenSSL, GNU coreutils, and OpenSSH;
 - Podman or Docker for the exact tag-and-digest-pinned Butane,
   coreos-installer, and Stalwart CLI images.
@@ -17,6 +17,10 @@ The deployment also needs:
 - a Hetzner Cloud project and a read/write API token;
 - an existing deSEC zone and a bootstrap token allowed to read it, manage its
   records, and manage child tokens;
+- Hetzner Object Storage, Backblaze B2, and Scaleway accounts when mail backups
+  are enabled;
+- a dedicated Scaleway project for encrypted OpenTofu state and a separate
+  dedicated project for the cold mail archive;
 - control of the domain's registrar so the existing deSEC nameserver and
   DNSSEC DS records can be verified;
 - an SSH public key for the FCOS operator account.
@@ -96,7 +100,21 @@ Set:
 
 - `HCLOUD_TOKEN` to the Hetzner project token;
 - `DESEC_API_TOKEN` to the deSEC bootstrap token with zone read/write and
-  token-management authority.
+  token-management authority;
+- `SCW_ACCESS_KEY` and `SCW_SECRET_KEY` to the operator-side Scaleway identity
+  that owns the state and backup projects;
+- `TOFU_STATE_PASSPHRASE` to at least 32 random characters, with an offline
+  recovery copy;
+- `MINIO_USER` and `MINIO_PASSWORD` to the S3 key for a dedicated Hetzner
+  project containing only the mail-backup bucket; this single pair manages the
+  bucket and is synchronized to the mail host for both backup paths;
+- `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY` to an operator-side B2 key
+  allowed to manage the dedicated hot bucket and create its runtime key.
+
+The Hetzner, B2, and Scaleway provider values are needed only when the
+three-provider backup boundary is enabled. The B2 and Scaleway provider values
+remain operator-side. The Hetzner pair is intentionally shared with the mail
+host, so keep its project dedicated to this one mutable hot-backup bucket.
 
 Edit the application scope:
 
@@ -104,9 +122,20 @@ Edit the application scope:
 make sops-mail-edit
 ```
 
-Set `MAIL_POSTGRES_PASSWORD` to a unique random value of at least 32 characters.
-Do not manually invent `STALWART_DESEC_API_TOKEN`; OpenTofu creates and
-synchronizes it after apply.
+Set distinct random values of at least 32 characters for
+`MAIL_POSTGRES_ADMIN_PASSWORD`, `MAIL_POSTGRES_PASSWORD` (the non-superuser
+Stalwart login), and `MAIL_POSTGRES_DUMP_PASSWORD` (the read-only logical dump
+login). For backups, generate independent random values of at least 32
+characters for `PGBACKREST_REPO1_CIPHER_PASS` and
+`PGBACKREST_REPO2_CIPHER_PASS`, and retain tested offline copies. Run
+`make sops-mail-generate-backup-signing-key` to create the initial separate
+Ed25519 signing pair directly inside SOPS or idempotently register its public
+key in `SOPS/backup-signing-public-keys/`. Commit that non-secret public key.
+Use only `make sops-mail-rotate-backup-signing-key` for an intentional rotation;
+it retains the previous public key so older archives remain verifiable. Do not
+manually invent `STALWART_DESEC_API_TOKEN`, the Hetzner runtime values, either
+B2 runtime key, or the Scaleway cold-write key; the apply workflow synchronizes
+those values into mail SOPS.
 
 SOPS decrypts each scope only into the child process selected by the Make
 target. Plaintext secret files and shell exports are not part of the workflow.
@@ -119,18 +148,24 @@ Create the ignored deployment variables file:
 cp OpenTofu/terraform.tfvars.example OpenTofu/terraform.tfvars
 ```
 
-At minimum, replace `example.com` with the deSEC zone and review:
+Review the fixed `thefutureisprivate.dev` deSEC zone and:
 
 - Hetzner location and CX23 server type;
 - the fleet-wide `nodes` map and `mail_server_node_key` role assignment;
 - the mail subname used for forward and reverse DNS;
-- `stalwart_dkim_selectors`; leave this bootstrap input empty because
-  `make stalwart-bootstrap` discovers the exact live selectors and writes the
-  ignored generated override before automatic DNS publication is enabled;
+- `OpenTofu/stalwart-authority.tfvars.json`, whose reviewed DKIM selectors and
+  ACME account are authorization inputs rather than workload discovery;
 - `mail_ingress_rules`, which are attached only to the selected mail node;
 - `primary_ip_import_ids`, which adopts an existing deployment's IPv4 and IPv6
   resource IDs without changing their addresses (leave empty for new nodes);
+- the three distinct mail-backup bucket names, the Paris Scaleway region,
+  dedicated Scaleway cold-project ID, and public backup age recipient;
 - billable backups and delete protection.
+
+Generate the backup age identity on an offline recovery medium and place only
+its public `age1...` recipient in `mail_backup_age_recipient`. Keep it distinct
+from the workstation SOPS identity so compromise of routine deployment access
+does not also reveal cold backup plaintext.
 
 SSH and ICMP rules are built into the base firewall shared by every node. SSH
 accepts connections from all IPv4 and IPv6 sources by design, while
@@ -145,10 +180,50 @@ new nodes use explicit protected Primary IPs from their first creation.
 
 ## Plan and Apply
 
-Initialize the provider lock and modules:
+Bootstrap the versioned remote-state bucket before the main root. Copy and edit
+the ignored bootstrap variables, then apply with encrypted local bootstrap
+state:
+
+```bash
+cp OpenTofu/bootstrap/terraform.tfvars.example OpenTofu/bootstrap/terraform.tfvars
+make tofu-backend-bootstrap
+cp OpenTofu/backend.hcl.example OpenTofu/backend.hcl
+```
+
+Copy the non-secret bucket, endpoint, and region from the bootstrap output into
+`backend.hcl`. Credentials remain in SOPS and are not written to that file. For
+a new root, initialize the provider lock and remote backend:
 
 ```bash
 make tofu-init
+```
+
+The wrapper has no plaintext compatibility mode: state and saved plans must use
+PBKDF2-derived AES-GCM encryption from their creation. It fails closed if a
+plaintext `terraform.tfstate*` or plan artifact appears in either root.
+
+The S3 backend is authoritative: OpenTofu does not maintain a synchronized
+local state file when a remote backend is active. Successful `make apply`
+creates an additional timestamped recovery
+snapshot under the git-ignored `OpenTofu/state-snapshots/` directory. The
+snapshot command streams the decrypted backend state directly into SOPS,
+encrypts it to the repository's age recipient, and never persists plaintext.
+Create another snapshot after a manual import or other direct state mutation:
+
+```bash
+make tofu-state-snapshot
+```
+
+These files are recovery copies, not writable state backends. They protect
+against accidental deletion of the remote bucket, but they are not a separate
+failure domain if the workstation is lost. Preserve the SOPS age identity in
+tested offline custody. After confirmed loss of the remote state, recreate and
+initialize the empty backend, review the selected snapshot, and restore it
+without writing decrypted JSON to disk:
+
+```bash
+make tofu-state-restore \
+  TOFU_STATE_SNAPSHOT=OpenTofu/state-snapshots/infrastructure-<timestamp>.sops.json
 ```
 
 Create a saved plan:
@@ -159,10 +234,8 @@ make plan
 
 Review the plan before applying it. In particular, confirm the final server's
 `nbg1` location, transient native bootstrap image, firewall ports, server
-addresses, DNS zone, declarative RRset imports, and every exact Stalwart token
-policy. The first apply adopts only the RRsets
-listed in `OpenTofu/zone.tf`; it does not manage any
-Stalwart-owned mail records.
+addresses, DNS zone, controller-owned static RRsets, and every exact Stalwart
+token policy. OpenTofu does not manage any Stalwart-owned mail records.
 
 Apply the saved plan:
 
@@ -171,20 +244,50 @@ make apply
 ```
 
 After OpenTofu finishes, the Make target reads the sensitive Stalwart child
-token from state and writes it directly into `SOPS/mail.sops.yaml` through
-`sops set --value-stdin`.
+token plus generated B2 pgBackRest, B2 signed-archive, and Scaleway runtime
+backup keys from encrypted state. It also copies the dedicated Hetzner backup
+pair from infrastructure SOPS. All runtime values are written directly into
+`SOPS/mail.sops.yaml` through `sops set --value-stdin`; no plaintext credential
+file is retained. The synchronizer also removes the retired separate Hetzner
+pgBackRest fields from mail SOPS.
 
 Inspect the non-secret outputs:
 
 ```bash
-tofu -chdir=OpenTofu output servers
-tofu -chdir=OpenTofu output dns_records
-tofu -chdir=OpenTofu output stalwart_desec_token_scope
-tofu -chdir=OpenTofu output desec_dnssec_ds_records
+make tofu-output
 ```
+
+Sensitive values remain redacted by the human-readable output command.
 
 Compare the deSEC delegation and DS records with the registrar. DNSSEC is not
 complete unless the registrar publishes the expected DS records.
+
+For the initial backup rollout, keep both backup flags false until the
+encrypted remote backend is operational. Create one S3 credential pair in a
+dedicated Hetzner project, store it as `MINIO_USER` and `MINIO_PASSWORD`, set all
+backup variables, set `mail_backup_storage_enabled = true`, and apply the
+reviewed plan that creates the protected buckets. Keep that storage flag true, set
+`mail_backup_enabled = true`, and apply a second reviewed plan to create fresh
+runtime identities and publish the host schedules. Then run:
+
+```bash
+make inventory
+make deploy
+```
+
+If an earlier deployment stored pgBackRest data directly under `stalwart/`,
+copy both repositories into `stalwart/pgbackrest/` with trusted maintenance
+credentials before deploying this prefix split. Verify both copies before
+revoking the old grants.
+
+Deployment first reconciles the administrator, non-superuser Stalwart, and
+read-only dump roles before PostgreSQL is considered started. The controller
+builds the pinned PostgreSQL-derived backup image, transfers a checksum-verified
+OCI archive over the pinned SSH channel, and the VPS only loads that reviewed
+artifact; no image build runs on the server. Deployment then initializes both encrypted
+pgBackRest stanzas, and starts the full, differential, logical, and
+repository-check timers. Treat successful `mail-pgbackrest-init.service` and a
+manual full backup as rollout gates.
 
 ## Install Fedora CoreOS Directly
 
@@ -205,7 +308,10 @@ supported unmounted block device, and lets CoreOS Installer verify Fedora's OS
 image signature. The installed kernel arguments enable DHCP in the initramfs so
 Afterburn can reach Hetzner's link-local metadata service before Ignition
 completes. After SSH confirms an FCOS ostree boot, the marker changes to
-`installed`; that final check also requires non-interactive operator sudo. A
+`awaiting-verification`. Add the independently verified permanent host key to
+`Ansible/inventory/known_hosts` and rerun `make install`; only a strict pinned
+SSH check with non-interactive operator sudo and working gVisor changes it to
+`installed`. A
 normal second run skips that node.
 
 Optional environment variables are:
@@ -284,10 +390,11 @@ The target generates a fresh 256-bit recovery password and then automatically:
 3. installs the checksum-verified local Web UI Application;
 4. configures the deSEC provider, server identity, services, Domain, automatic
    DKIM, and both Let's Encrypt ACME providers;
-5. records the exact generated DKIM selectors and active ACME account URI in
-   the ignored `OpenTofu/stalwart-dkim.generated.tfvars.json` file, applies the
-   matching deSEC token policies, and publishes the OpenTofu-owned CAA, DMARC,
-   and TLS-RPT RRsets;
+5. verifies the exact generated DKIM selectors and active ACME account URI
+   against `OpenTofu/stalwart-authority.tfvars.json`, applies only those
+   reviewed deSEC token policies, publishes the OpenTofu-owned CAA RRsets, and
+   transfers MX, SPF, SRV, Microsoft Autodiscover, DMARC, and TLS-RPT
+   publication to Stalwart;
 6. on the first rollout only, proves DNS-01 issuance with Let's Encrypt
    staging, switches to production, retires only that verified staging
    certificate while certificate management is temporarily Manual, and
@@ -304,6 +411,14 @@ The target generates a fresh 256-bit recovery password and then automatically:
    preserves the named secret and reports it so the still-running recovery
    deployment remains repairable; run `make deploy`, then remove that exact
    Podman secret as instructed.
+
+On a genuinely fresh Stalwart data volume, the first invocation may stop after
+creating the ACME accounts because their server-issued account URIs cannot be
+reviewed in advance. Inspect those public identities, update and commit
+`OpenTofu/stalwart-authority.tfvars.json`, then rerun the same target. The
+Domain retains the `staged enrollment pending` marker across retries and
+interruptions, so the rerun still performs staging before production. The
+production plan clears that marker only after the reviewed transition begins.
 
 The recovery password exists only in bootstrap process memory and transient
 Podman secrets on the controller and server. It is not written to SOPS,

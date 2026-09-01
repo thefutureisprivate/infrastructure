@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+lock_path=/var/lib/mail-backup/backup.lock
+if [[ -L ${lock_path} ]] || [[ -e ${lock_path} && ! -f ${lock_path} ]]; then
+  printf 'Refusing unsafe mail backup lock path: %s\n' "${lock_path}" >&2
+  exit 1
+fi
+if [[ ! -e ${lock_path} ]]; then
+  install -o root -g root -m 0600 /dev/null "${lock_path}"
+fi
+chown root:root "${lock_path}"
+chmod 0600 "${lock_path}"

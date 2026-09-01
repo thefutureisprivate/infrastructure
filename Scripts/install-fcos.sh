@@ -12,7 +12,10 @@ install_device=${FCOS_INSTALL_DEVICE:-/dev/sda}
 node_key=${FCOS_NODE_KEY:-}
 runtime=${CONTAINER_RUNTIME:-auto}
 ssh_private_key=${SSH_PRIVATE_KEY_FILE:-}
+fcos_known_hosts_file=${FCOS_KNOWN_HOSTS_FILE:-"${repo_root}/Ansible/inventory/known_hosts"}
 reinstall=${FCOS_REINSTALL:-0}
+ssh_attempts=${FCOS_SSH_ATTEMPTS:-90}
+ssh_retry_delay=${FCOS_SSH_RETRY_DELAY:-5}
 coreos_installer_image=$("${repo_root}/Scripts/tool-image.sh" coreos-installer)
 remote_installer="${repo_root}/Scripts/install-fcos-rescue-remote.sh"
 api_base=https://api.hetzner.cloud/v1
@@ -63,12 +66,15 @@ if [[ ${reinstall} != 0 && ${reinstall} != 1 ]]; then
   printf 'FCOS_REINSTALL must be 0 or 1.\n' >&2
   exit 2
 fi
+if [[ ! ${ssh_attempts} =~ ^[1-9][0-9]*$ || ! ${ssh_retry_delay} =~ ^[0-9]+$ ]]; then
+  printf 'FCOS SSH retry controls must be positive attempts and a non-negative delay.\n' >&2
+  exit 2
+fi
 if [[ -n ${ssh_private_key} && ! -r ${ssh_private_key} ]]; then
   printf 'SSH private key is not readable: %s\n' "${ssh_private_key}" >&2
   exit 2
 fi
-
-for command_name in curl jq scp ssh sha256sum tar; do
+for command_name in curl install jq scp ssh sha256sum tar; do
   command -v "${command_name}" >/dev/null 2>&1 || {
     printf '%s is required.\n' "${command_name}" >&2
     exit 1
@@ -78,6 +84,21 @@ command -v "${tofu_bin}" >/dev/null 2>&1 || {
   printf '%s is required.\n' "${tofu_bin}" >&2
   exit 1
 }
+
+if [[ -L ${fcos_known_hosts_file} || \
+      ( -e ${fcos_known_hosts_file} && ! -f ${fcos_known_hosts_file} ) ]]; then
+  printf 'Pinned FCOS known-hosts path is not a regular file: %s\n' \
+    "${fcos_known_hosts_file}" >&2
+  exit 2
+fi
+if [[ ! -e ${fcos_known_hosts_file} ]]; then
+  install -m 0600 /dev/null "${fcos_known_hosts_file}"
+fi
+if [[ ! -r ${fcos_known_hosts_file} ]]; then
+  printf 'Pinned FCOS known-hosts file is not readable: %s\n' \
+    "${fcos_known_hosts_file}" >&2
+  exit 2
+fi
 
 work_parent=${TMPDIR:-"${repo_root}/build"}
 install -d -m 0700 -- "${work_parent}"
@@ -280,7 +301,7 @@ create_installer_bundle() {
 }
 
 ssh_options_for() {
-  local known_hosts_file=$1
+  local known_hosts_file=$1 trust_mode=$2 host_key_alias=${3:-}
   SSH_OPTIONS=(
     -F /dev/null
     -o BatchMode=yes
@@ -291,29 +312,33 @@ ssh_options_for() {
     -o ConnectTimeout=10
     -o ServerAliveInterval=10
     -o ServerAliveCountMax=3
-    -o StrictHostKeyChecking=accept-new
+    -o "StrictHostKeyChecking=${trust_mode}"
     -o "UserKnownHostsFile=${known_hosts_file}"
   )
+  if [[ -n ${host_key_alias} ]]; then
+    SSH_OPTIONS+=(-o "HostKeyAlias=${host_key_alias}")
+  fi
   if [[ -n ${ssh_private_key} ]]; then
     SSH_OPTIONS+=(-o IdentitiesOnly=yes -i "${ssh_private_key}")
   fi
 }
 
 wait_for_ssh() {
-  local destination=$1 known_hosts_file=$2 remote_check=$3 attempt
-  ssh_options_for "${known_hosts_file}"
-  for ((attempt = 1; attempt <= 90; attempt++)); do
+  local destination=$1 known_hosts_file=$2 trust_mode=$3 remote_check=$4
+  local host_key_alias=${5:-} attempt
+  ssh_options_for "${known_hosts_file}" "${trust_mode}" "${host_key_alias}"
+  for ((attempt = 1; attempt <= ssh_attempts; attempt++)); do
     if ssh "${SSH_OPTIONS[@]}" "${destination}" "${remote_check}" </dev/null >/dev/null 2>&1; then
       return 0
     fi
-    sleep 5
+    sleep "${ssh_retry_delay}"
   done
   return 1
 }
 
 install_target() {
-  local key=$1 target server_id server_name address api_address expected_address install_state
-  local rescue_known_hosts fcos_known_hosts ssh_destination scp_destination remote_dir
+  local key=$1 target server_id server_name address api_address fqdn expected_address install_state
+  local rescue_known_hosts ssh_destination scp_destination remote_dir
   local ignition_sha256 bundle_sha256 installer_sha256 current
   local ssh_key_id=$2
 
@@ -322,8 +347,10 @@ install_target() {
   server_name=$(jq -r '.name' <<<"${target}")
   address=$(jq -r '.address' <<<"${target}")
   api_address=$(jq -r '.api_address' <<<"${target}")
+  fqdn=$(jq -r '.fqdn' <<<"${target}")
   if [[ ! ${server_id} =~ ^[0-9]+$ || -z ${address} || ${address} == null || \
-        -z ${api_address} || ${api_address} == null ]]; then
+        -z ${api_address} || ${api_address} == null || \
+        ! ${fqdn} =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]]; then
     printf 'Invalid OpenTofu install target for node %s.\n' "${key}" >&2
     return 1
   fi
@@ -346,6 +373,23 @@ install_target() {
     printf 'Node %s (%s) is already marked installed; skipping.\n' "${key}" "${server_name}"
     return 0
   fi
+  if [[ ${install_state} == awaiting-verification && ${reinstall} == 0 ]]; then
+    printf 'Verifying independently pinned FCOS host key for node %s (%s).\n' \
+      "${key}" "${server_name}"
+    if ! wait_for_ssh \
+      "thefutureisprivate@${address}" \
+      "${fcos_known_hosts_file}" yes \
+      '. /etc/os-release; test "$ID" = fedora; test "${VARIANT_ID:-}" = coreos; test -e /run/ostree-booted; sudo -n /usr/bin/true; systemctl is-active --quiet gvisor-install.service; /usr/local/bin/runsc --version >/dev/null' \
+      "${fqdn}"; then
+      printf 'Pinned host-key verification failed for node %s. Verify its host key independently and update %s.\n' \
+        "${key}" "${fcos_known_hosts_file}" >&2
+      return 1
+    fi
+    set_install_state "${server_id}" installed
+    printf 'Node %s (%s) is running verified Fedora CoreOS.\n' \
+      "${key}" "${server_name}"
+    return 0
+  fi
   if [[ ${install_state} != pending && ${install_state} != installing && \
         ! ( ${install_state} == installed && ${reinstall} == 1 ) ]]; then
     printf 'Node %s has unexpected fcos-installation label %q; refusing.\n' \
@@ -354,7 +398,6 @@ install_target() {
   fi
 
   rescue_known_hosts="${work_dir}/known-hosts-rescue-${server_id}"
-  fcos_known_hosts="${work_dir}/known-hosts-fcos-${server_id}"
   ssh_destination="root@${address}"
   if [[ ${address} == *:* ]]; then
     scp_destination="root@[${address}]"
@@ -369,12 +412,12 @@ install_target() {
   printf 'Booting node %s (%s) into Hetzner Rescue.\n' "${key}" "${server_name}"
   set_install_state "${server_id}" installing
   enable_rescue "${server_id}" "${ssh_key_id}"
-  if ! wait_for_ssh "${ssh_destination}" "${rescue_known_hosts}" true; then
+  if ! wait_for_ssh "${ssh_destination}" "${rescue_known_hosts}" accept-new true; then
     printf 'Timed out waiting for node %s to enter Hetzner Rescue.\n' "${key}" >&2
     return 1
   fi
 
-  ssh_options_for "${rescue_known_hosts}"
+  ssh_options_for "${rescue_known_hosts}" accept-new
   ssh "${SSH_OPTIONS[@]}" "${ssh_destination}" \
     "install -d -m 0700 -- ${remote_dir}"
   scp "${SSH_OPTIONS[@]}" \
@@ -390,12 +433,15 @@ install_target() {
     "${bundle_sha256}" "${ignition_sha256}" "${installer_sha256}"
 
   printf 'Rebooting node %s into Fedora CoreOS.\n' "${key}"
+  set_install_state "${server_id}" awaiting-verification
   reset_server "${server_id}"
   if ! wait_for_ssh \
     "thefutureisprivate@${address}" \
-    "${fcos_known_hosts}" \
-    '. /etc/os-release; test "$ID" = fedora; test "${VARIANT_ID:-}" = coreos; test -e /run/ostree-booted; sudo -n /usr/bin/true; systemctl is-active --quiet gvisor-install.service; /usr/local/bin/runsc --version >/dev/null'; then
-    printf 'Timed out waiting for verified FCOS boot on node %s.\n' "${key}" >&2
+    "${fcos_known_hosts_file}" yes \
+    '. /etc/os-release; test "$ID" = fedora; test "${VARIANT_ID:-}" = coreos; test -e /run/ostree-booted; sudo -n /usr/bin/true; systemctl is-active --quiet gvisor-install.service; /usr/local/bin/runsc --version >/dev/null' \
+    "${fqdn}"; then
+    printf 'Pinned host-key verification failed for node %s. The node remains awaiting-verification; verify its key independently and update %s, then rerun.\n' \
+      "${key}" "${fcos_known_hosts_file}" >&2
     return 1
   fi
   set_install_state "${server_id}" installed

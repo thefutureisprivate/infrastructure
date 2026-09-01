@@ -7,7 +7,9 @@
 {"@type":"update","object":"Imap","value":{"maxConcurrent":8,"maxRequestRate":{"count":1000,"period":60000},"maxRequestSize":52428800}}
 {"@type":"update","object":"Jmap","value":{"maxConcurrentRequests":4,"maxRequestSize":10000000,"maxMethodCalls":16}}
 {"@type":"update","object":"Authentication","value":{"passwordHashAlgorithm":"argon2id","passwordMinLength":16,"passwordMinStrength":"four","maxApiKeys":2,"maxAppPasswords":3}}
+{"@type":"update","object":"ReportSettings","value":{"inboundReportAddresses":{"reports@thefutureisprivate.dev":true},"inboundReportForwarding":true}}
 {"@type":"update","object":"WebDav","value":{"enableAssistedDiscovery":false,"maxLockTimeout":3600000,"maxLocks":10,"deadPropertyMaxSize":1024,"livePropertyMaxSize":250,"requestMaxSize":26214400,"maxResults":2000}}
 {"@type":"update","object":"MtaStageAuth","value":{"maxFailures":{"else":"3"},"waitOnFail":{"else":"5s"},"saslMechanisms":{"match":{"0":{"if":"local_port != 25 && is_tls","then":"[plain, login, oauthbearer, xoauth2]"}},"else":"false"},"mustMatchSender":{"else":"true"},"require":{"else":"local_port != 25"}}}
 {"@type":"update","object":"MtaStageMail","value":{"isSenderAllowed":{"else":"is_tls && (!is_empty(authenticated_as) || !key_exists('spam-block', sender_domain))"}}}
+{"@type":"update","object":"DnsResolver","value":{"@type":"Cloudflare","useTls":true,"preserveIntermediates":true,"concurrency":2,"timeout":5000,"attempts":2,"tcpOnError":true,"enableEdns":true}}
 {"@type":"reconcile","object":"Application","matchOn":["description"],"value":{"webui":{"enabled":true,"description":"Stalwart Web Interface","resourceUrl":"file:///opt/stalwart-webui/webui.zip","urlPrefix":{"/admin":true,"/account":true},"autoUpdateFrequency":31536000000,"unpackDirectory":null,"oauthClientId":null}}}

@@ -1,0 +1,5 @@
+---
+systemd_unit_directory: "/etc/systemd/system"
+systemd_unit_units: []
+systemd_unit_absent_units: []
+systemd_unit_systemctl_binary: "/usr/bin/systemctl"

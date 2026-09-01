@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ ${TF_ENCRYPTION:-} == *'method "aes_gcm" "infrastructure_state"'* ]]
+[[ -z ${TOFU_STATE_PASSPHRASE+x} ]]
+[[ $* == *'state push -lock-timeout=60s -'* ]]
+
+jq -e '
+  .version == 4
+  and .serial == 7
+  and .lineage == "state-lineage"
+  and .outputs.credential.value == "top-secret-output"
+  and (.resources | length == 1)
+' >/dev/null

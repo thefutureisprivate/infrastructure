@@ -126,6 +126,18 @@ def main() -> None:
         "NetworkManager drop-in",
     )
 
+    zram_item, zram_text = embedded_file(
+        config, "/etc/systemd/zram-generator.conf"
+    )
+    if zram_item.get("mode") != 0o644:
+        fail("zram-generator configuration does not use mode 0644")
+    for owner_type in ("user", "group"):
+        owner = zram_item.get(owner_type)
+        if not isinstance(owner, dict) or owner.get("name") != "root":
+            fail(f"zram-generator configuration {owner_type} is not root")
+    if zram_text != "[zram0]\nzram-size = ram / 2\n":
+        fail("zram-generator configuration has unexpected contents")
+
     systemd = config.get("systemd")
     units = systemd.get("units", []) if isinstance(systemd, dict) else []
     resolved_units = [

@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily age-encrypted logical mail archive
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+FixedRandomDelay=true
+Unit=mail-backup-logical-run.service
+
+[Install]
+WantedBy=timers.target

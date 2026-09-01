@@ -4,6 +4,28 @@
   gather_facts: false
 
   pre_tasks:
+    - name: "Validate PostgreSQL role credential isolation"
+      ansible.builtin.assert:
+        that:
+          - "mail_postgres_admin_password is string"
+          - "mail_postgres_password is string"
+          - "mail_postgres_dump_password is string"
+          - "mail_postgres_admin_password | length >= 32"
+          - "mail_postgres_password | length >= 32"
+          - "mail_postgres_dump_password | length >= 32"
+          - "mail_postgres_admin_password != mail_postgres_password"
+          - "mail_postgres_admin_password != mail_postgres_dump_password"
+          - "mail_postgres_password != mail_postgres_dump_password"
+        fail_msg: >-
+          PostgreSQL administrator, Stalwart application, and logical-dump
+          passwords must be three distinct random values of at least 32 characters.
+        quiet: true
+      no_log: true
+      delegate_to: "localhost"
+      become: false
+      tags:
+        - "mail-postgres-credentials"
+
     - name: "Validate the public Stalwart hostname"
       ansible.builtin.assert:
         that:
@@ -13,11 +35,15 @@
           - "inventory_hostname is match('^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')"
           - "mail_stalwart_bootstrap_listener is defined"
           - "mail_stalwart_bootstrap_listener is boolean"
+          - "mail_stalwart_bootstrap_tls is defined"
+          - "mail_stalwart_bootstrap_tls is boolean"
           - "mail_stalwart_bootstrap_secret_name is defined"
           - "mail_stalwart_bootstrap_secret_name is string"
+          - "mail_backup_is_enabled is boolean"
           - >-
             (not mail_stalwart_bootstrap_listener) or
             (mail_stalwart_bootstrap_secret_name is match('^[A-Za-z0-9][A-Za-z0-9_.-]{0,126}$'))
+          - "mail_stalwart_bootstrap_listener or not mail_stalwart_bootstrap_tls"
         fail_msg: >-
           Mail deployment inputs must contain valid public and cluster hostnames,
           boolean bootstrap state, and a safe temporary Podman secret name whenever
@@ -26,6 +52,36 @@
       delegate_to: "localhost"
       become: false
 
+    - name: "Validate encrypted mail backup topology"
+      ansible.builtin.assert:
+        that:
+          - "mail_backup_age_recipient is defined"
+          - "mail_backup_age_recipient is match('^age1[0-9a-z]{40,}$')"
+          - "mail_backup_hetzner_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')"
+          - "mail_backup_hetzner_endpoint is match('^[A-Za-z0-9.-]+[.]your-objectstorage[.]com$')"
+          - "mail_backup_hetzner_region in ['fsn1', 'nbg1', 'hel1']"
+          - "mail_backup_b2_bucket | length >= 6"
+          - "mail_backup_b2_endpoint is match('^[A-Za-z0-9.-]+[.]backblazeb2[.]com$')"
+          - "mail_backup_b2_region is match('^[a-z0-9-]+$')"
+          - "mail_backup_scaleway_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')"
+          - "mail_backup_scaleway_endpoint == 'https://s3.fr-par.scw.cloud'"
+          - "mail_backup_scaleway_region == 'fr-par'"
+        fail_msg: >-
+          Enabled mail backups require exact non-secret bucket, endpoint,
+          region, and native age-recipient values from OpenTofu inventory.
+        quiet: true
+      when: "mail_backup_is_enabled | bool"
+      delegate_to: "localhost"
+      become: false
+
+    - name: "Retire backup schedules before removing their Quadlets and secrets"
+      ansible.builtin.include_role:
+        name: "systemd_unit"
+      vars:
+        systemd_unit_units: []
+      when: "not mail_backup_is_enabled | bool"
+
   roles:
     - role: "stalwart_webui"
     - role: "quadlet"
+    - role: "systemd_unit"

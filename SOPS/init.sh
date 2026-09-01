@@ -23,6 +23,7 @@ fi
 filename_override=$(basename -- "${output_file}")
 
 command -v sops >/dev/null 2>&1 || { printf 'sops is not installed.\n' >&2; exit 1; }
+command -v openssl >/dev/null 2>&1 || { printf 'openssl is not installed.\n' >&2; exit 1; }
 
 if [[ ! -r "${config_file}" ]]; then
   printf 'Create SOPS/config.yaml from SOPS/config.example.yaml and set your public age recipient first.\n' >&2
@@ -44,8 +45,17 @@ fi
 temporary_output=$(mktemp "${sops_dir}/.sops.XXXXXX")
 trap 'rm -f -- "${temporary_output}"' EXIT HUP INT TERM
 
-(cd "${sops_dir}" && sops --config "${config_file}" --encrypt \
-  --filename-override "${filename_override}" <"${template_file}" >"${temporary_output}")
+generated_state_passphrase=$(openssl rand -base64 48)
+if [[ ! ${generated_state_passphrase} =~ ^[A-Za-z0-9+/=]{64,}$ ]]; then
+  printf 'OpenSSL did not generate the expected state passphrase.\n' >&2
+  exit 1
+fi
+(cd "${sops_dir}" && \
+  sed "s#replace-with-at-least-32-random-characters-kept-offline-too#${generated_state_passphrase}#" \
+    "${template_file}" | \
+  sops --config "${config_file}" --encrypt \
+    --filename-override "${filename_override}" >"${temporary_output}")
+unset generated_state_passphrase
 grep -q '^sops:' "${temporary_output}" || { printf 'SOPS output has no metadata block.\n' >&2; exit 1; }
 chmod 0600 "${temporary_output}"
 mv -f -- "${temporary_output}" "${output_file}"

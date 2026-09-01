@@ -1,0 +1,23 @@
+[Unit]
+Description=Initialize and verify encrypted pgBackRest repositories
+# Restart initialization when its managed implementation changes.
+# script-sha256={{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-pgbackrest.sh.j2') | hash('sha256') }}
+# runner-sha256={{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-backup-run.sh.j2') | hash('sha256') }}
+BindsTo=mail-postgres.service
+Requires=mail-backup-lock.service
+After=mail-postgres.service mail-backup-lock.service network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ quadlet_directory }}/mail-backup-run.sh init
+StateDirectory=mail-backup
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectSystem=full
+TimeoutStartSec=23520
+
+[Install]
+WantedBy=multi-user.target

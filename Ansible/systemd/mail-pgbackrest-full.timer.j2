@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly full encrypted pgBackRest backup
+
+[Timer]
+OnCalendar=Sun *-*-* 02:00:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+FixedRandomDelay=true
+Unit=mail-pgbackrest-backup@full.service
+
+[Install]
+WantedBy=timers.target

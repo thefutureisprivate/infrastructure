@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+staging_directory=${MAIL_BACKUP_STAGING_DIRECTORY:-/backup}
+ciphertext="${staging_directory}/backup.dump.age"
+manifest="${staging_directory}/manifest.json"
+signature="${staging_directory}/manifest.sig"
+public_key=${MAIL_BACKUP_SIGNING_PUBLIC_KEY_FILE:-/run/secrets/mail-backup-signing-public-key}
+failed_directory="${staging_directory}/failed"
+
+quarantine_staging() {
+  local quarantine
+  quarantine="${failed_directory}/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  mkdir -p -m 0700 -- "${quarantine}"
+  for staged in "${ciphertext}" "${manifest}" "${signature}"; do
+    if [[ -e ${staged} || -L ${staged} ]]; then
+      mv -- "${staged}" "${quarantine}/"
+    fi
+  done
+  printf 'Quarantined invalid signed-backup staging at %s.\n' "${quarantine}" >&2
+}
+
+quarantine_failed_validation() {
+  local status=$?
+  trap - EXIT
+  if ((status != 0)); then
+    quarantine_staging || true
+  fi
+  exit "${status}"
+}
+
+if [[ ! -e ${ciphertext} && ! -e ${manifest} && ! -e ${signature} ]]; then
+  exit 0
+fi
+for required in "${ciphertext}" "${manifest}" "${signature}"; do
+  if [[ ! -f ${required} || -L ${required} ]]; then
+    printf 'Incomplete or unsafe signed-backup staging file: %s.\n' "${required}" >&2
+    quarantine_staging
+    exit 1
+  fi
+done
+trap quarantine_failed_validation EXIT
+
+if ! jq -e '
+  type == "object"
+  and (keys | sort) == ["bytes", "destinations", "sha256", "signingKeyId", "timestamp", "version"]
+  and (.destinations | type == "object")
+  and (.destinations | keys | sort) == ["backblaze", "hetzner", "scaleway"]
+  and all(.destinations[];
+    type == "object" and (keys | sort) == ["bucket", "object"])
+' "${manifest}" >/dev/null; then
+  printf 'Signed-backup manifest has an unexpected schema.\n' >&2
+  exit 1
+fi
+
+timestamp=$(jq -er '.timestamp | select(test("^[0-9]{8}T[0-9]{6}Z$"))' "${manifest}")
+signing_key_id=$(jq -er 'select(.version == 2) | .signingKeyId | select(test("^[0-9a-f]{64}$"))' "${manifest}")
+active_key_id=$(openssl pkey -pubin -in "${public_key}" -outform DER |
+  sha256sum | awk '{print $1}')
+[[ ${signing_key_id} == "${active_key_id}" ]]
+scaleway_bucket=$(jq -er '.destinations.scaleway.bucket' "${manifest}")
+scaleway_object=$(jq -er '.destinations.scaleway.object | select(test("^logical/stalwart-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}[.]dump[.]age$"))' "${manifest}")
+hetzner_bucket=$(jq -er '.destinations.hetzner.bucket' "${manifest}")
+hetzner_object=$(jq -er '.destinations.hetzner.object | select(test("^stalwart/signed-logical/stalwart-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}[.]dump[.]age$"))' "${manifest}")
+b2_bucket=$(jq -er '.destinations.backblaze.bucket' "${manifest}")
+b2_object=$(jq -er '.destinations.backblaze.object | select(test("^stalwart/signed-logical/stalwart-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}[.]dump[.]age$"))' "${manifest}")
+expected_digest=$(jq -er '.sha256 | select(test("^[0-9a-f]{64}$"))' "${manifest}")
+expected_bytes=$(jq -er '.bytes | select(type == "number" and . > 0 and floor == .)' "${manifest}")
+[[ ${scaleway_bucket} == "${MAIL_BACKUP_SCALEWAY_BUCKET}" ]]
+[[ ${hetzner_bucket} == "${MAIL_BACKUP_HETZNER_BUCKET}" ]]
+[[ ${b2_bucket} == "${MAIL_BACKUP_B2_BUCKET}" ]]
+archive_name=${scaleway_object#logical/}
+[[ ${archive_name} == "stalwart-${timestamp}-"* ]]
+[[ ${hetzner_object} == "stalwart/signed-logical/${archive_name}" ]]
+[[ ${b2_object} == "stalwart/signed-logical/${archive_name}" ]]
+[[ $(sha256sum "${ciphertext}" | awk '{print $1}') == "${expected_digest}" ]]
+[[ $(stat --format=%s "${ciphertext}") == "${expected_bytes}" ]]
+openssl pkeyutl -verify -rawin -pubin -inkey "${public_key}" \
+  -in "${manifest}" -sigfile "${signature}" >/dev/null
+trap - EXIT
+
+upload_object() {
+  local source=$1
+  local target=$2
+
+  # Archive names contain a cryptographically random nonce and must never
+  # collide. Avoid destination discovery so restricted writers need only
+  # PutObject; --s3-no-head covers the post-upload integrity probe. Low-level
+  # retries can safely retry the request, while disabling high-level retries
+  # avoids deliberately creating extra versions after an ambiguous success.
+  rclone copyto "${source}" "${target}" \
+    --no-check-dest \
+    --s3-no-check-bucket \
+    --s3-no-head-object \
+    --s3-no-head \
+    --retries 1 \
+    --low-level-retries 10
+}
+
+for destination in \
+  "hetzner:${hetzner_bucket}:${hetzner_object}" \
+  "backblaze:${b2_bucket}:${b2_object}" \
+  "scaleway:${scaleway_bucket}:${scaleway_object}"; do
+  remote=${destination%%:*}
+  remainder=${destination#*:}
+  bucket=${remainder%%:*}
+  object=${remainder#*:}
+  target="${remote}:${bucket}/${object}"
+  upload_object "${ciphertext}" "${target}"
+  upload_object "${manifest}" "${target}.manifest.json"
+  # The signature is the commit marker and is uploaded last. Restore tooling
+  # ignores any archive without a valid manifest/signature pair.
+  upload_object "${signature}" "${target}.manifest.sig"
+done
+
+rm -f -- "${ciphertext}" "${manifest}" "${signature}"
+printf 'Uploaded signed encrypted logical backup to all three providers: %s\n' \
+  "${scaleway_object##*/}"

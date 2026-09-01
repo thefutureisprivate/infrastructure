@@ -34,7 +34,9 @@ receives the same mail-independent Ignition and base firewall; only the
 selected mail node receives mail ingress and the mail Ansible role. OpenTofu
 manages infrastructure records, Stalwart is authorized to manage only the mail
 records it can maintain natively, secrets remain encrypted with SOPS and age,
-and application containers run behind the gVisor userspace kernel.
+application containers run behind the gVisor userspace kernel, and PostgreSQL
+is protected by two encrypted PITR repositories plus an independently encrypted
+Glacier archive.
 
 ## Architecture
 
@@ -43,9 +45,9 @@ The deployment is split into narrow layers:
 | Layer | Responsibility |
 | --- | --- |
 | Butane and Ignition | Reusable FCOS user, SSH, host hardening, and checksum-pinned gVisor baseline |
-| OpenTofu | Hetzner VPS fleet, base and role firewalls, per-node forward/reverse DNS, and the restricted Stalwart token |
+| OpenTofu | Hetzner VPS fleet, firewalls, DNS, restricted runtime identities, protected backup buckets, and encrypted remote state |
 | SOPS and age | Encrypted provider and application secret scopes |
-| Ansible | Python-free reconciliation of Podman secrets, support files, networks, volumes, and Quadlets |
+| Ansible | Python-free reconciliation of Podman secrets, Quadlets, encrypted backup jobs, and systemd timers |
 | Local Ansible | Silverblue updates, package layers, host hardening, and per-user Flatpaks |
 | Quadlet | Declarative systemd lifecycle for Stalwart and PostgreSQL |
 | Stalwart plan | Idempotent listener, password, protocol, queue, HTTP-header, CSP, rate-limit, and SMTP-auth policy |
@@ -126,15 +128,15 @@ Security controls are applied at every layer:
   enter only the child process that needs them. Ansible creates Podman secrets
   over standard input and renders no credentials into Quadlets.
 - **DNS:** the deSEC account retains zone lifecycle authority; OpenTofu owns the
-  selected shared RRsets, token, A/AAAA, PTR, CAA, DMARC, and TLS-RPT
-  declarations. The apex
+  selected static/shared RRsets, token, A/AAAA, PTR, and CAA declarations, while
+  Stalwart manages MX, SPF, SRV, Autodiscover, DMARC, and TLS-RPT. The apex
   critically denies TLS, wildcard, S/MIME, and BIMI mark-certificate issuance;
   `mail` permits only Stalwart's exact Let's Encrypt account using DNS-01 and
-  denies every other certificate class. CAA incidents go to `caa@`, DMARC
-  aggregate reports to `dmarc@`, and SMTP TLS reports to `tls-rpt@` within the
-  mail domain. Stalwart's child token has no CAA, DMARC, or TLS-RPT authority,
-  no zone-wide authority, and TLSA grants only for the exact enabled public TLS
-  listener names.
+  denies every other certificate class. CAA incidents go to the OpenTofu-owned
+  `caa@` destination, while DMARC and SMTP TLS reports go to the
+  Stalwart-managed `reports@` group mailbox. Both addresses deliver to that
+  dedicated mailbox. Stalwart's child token has no CAA or zone-wide authority;
+  every mail-record grant is limited to its exact enabled owner name and type.
 - **Supply chain:** provider locks, action commit pins, image digests, verified
   Stalwart server and CLI signatures and SLSA provenance, hash-locked CI tools,
   digest-pinned provisioning containers, a checksum-verified local Web UI, and
@@ -151,7 +153,7 @@ residual risks, and secret boundaries.
 | --- | --- |
 | OpenTofu 1.12.6 | Cloud, DNS, reverse-DNS, and scoped-token state |
 | SOPS and age | Local encryption and decryption of secret scopes |
-| Ansible Core 2.20 | Python-free remote Quadlet reconciliation |
+| Ansible Core 2.21 | Python-free remote Quadlet reconciliation |
 | Podman or Docker | Run the repository-pinned Butane, coreos-installer, and Stalwart CLI images |
 | jq, curl, OpenSSL, GNU coreutils, GNU Make, Bash, and OpenSSH | Local orchestration, audits, and inventory handling |
 
@@ -173,12 +175,19 @@ Prepare the encrypted credentials and deployment variables:
 make sops-infrastructure-edit
 make sops-mail-edit
 cp OpenTofu/terraform.tfvars.example OpenTofu/terraform.tfvars
+${EDITOR:-vi} OpenTofu/terraform.tfvars
 ```
 
 Initialize OpenTofu, create and apply a reviewed plan, install FCOS directly
 onto the resulting VPS, then render the inventory:
 
 ```bash
+cp OpenTofu/bootstrap/terraform.tfvars.example OpenTofu/bootstrap/terraform.tfvars
+${EDITOR:-vi} OpenTofu/bootstrap/terraform.tfvars
+make tofu-backend-bootstrap
+# Copy the bucket, endpoint, and region from the bootstrap output into this file.
+cp OpenTofu/backend.hcl.example OpenTofu/backend.hcl
+${EDITOR:-vi} OpenTofu/backend.hcl
 make tofu-init
 make plan
 make apply
@@ -206,7 +215,7 @@ installs the verified local Web UI, configures deSEC, Domain, DKIM, and
 production Let's Encrypt ACME, using staging only on the first rollout, grants
 only the exact DKIM selectors to the deSEC child token, and verifies the
 trusted certificate plus the
-OpenTofu-owned apex/mail CAA, DMARC, and TLS-RPT policy. Before revoking the recovery credential,
+OpenTofu-owned apex/mail CAA and Stalwart-owned mail DNS. Before revoking the recovery credential,
 it displays it once and waits for a regular administrator to be created and
 tested through the Web UI. The
 credential is never stored in the repository or SOPS.

@@ -5,7 +5,7 @@ sops_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 secrets_file=${SOPS_SECRETS_FILE:-"${sops_dir}/infrastructure.sops.yaml"}
 
 if (( $# < 4 )) || [[ $1 != --allow ]]; then
-  printf 'Usage: %s --allow NAME [NAME ...] -- <command> [arguments ...]\n' "$0" >&2
+  printf 'Usage: %s --allow NAME [NAME ...] [--optional NAME ...] -- <command> [arguments ...]\n' "$0" >&2
   exit 2
 fi
 
@@ -23,8 +23,20 @@ fi
 
 shift
 allowed_names=()
+required_names=()
+optional_names=()
 declare -A requested_names=()
+selection=required
 while (($# > 0)) && [[ $1 != -- ]]; do
+  if [[ $1 == --optional ]]; then
+    if [[ ${selection} == optional ]]; then
+      printf 'The optional allowlist may be declared only once.\n' >&2
+      exit 2
+    fi
+    selection=optional
+    shift
+    continue
+  fi
   if [[ ! $1 =~ ^[A-Z][A-Z0-9_]*$ ]]; then
     printf 'Invalid environment variable name in allowlist: %s\n' "$1" >&2
     exit 2
@@ -34,6 +46,11 @@ while (($# > 0)) && [[ $1 != -- ]]; do
     exit 2
   fi
   allowed_names+=("$1")
+  if [[ ${selection} == required ]]; then
+    required_names+=("$1")
+  else
+    optional_names+=("$1")
+  fi
   requested_names["$1"]=1
   shift
 done
@@ -53,9 +70,35 @@ fi
 known_secret_names=(
   HCLOUD_TOKEN
   DESEC_API_TOKEN
+  MINIO_USER
+  MINIO_PASSWORD
+  B2_APPLICATION_KEY_ID
+  B2_APPLICATION_KEY
+  SCW_ACCESS_KEY
+  SCW_SECRET_KEY
+  AWS_ACCESS_KEY_ID
+  AWS_SECRET_ACCESS_KEY
+  AWS_SESSION_TOKEN
+  TOFU_STATE_PASSPHRASE
+  MAIL_POSTGRES_ADMIN_PASSWORD
   MAIL_POSTGRES_PASSWORD
+  MAIL_POSTGRES_DUMP_PASSWORD
   STALWART_DESEC_API_TOKEN
   STALWART_CONFIG_API_TOKEN
+  PGBACKREST_REPO1_S3_KEY
+  PGBACKREST_REPO1_S3_KEY_SECRET
+  PGBACKREST_REPO1_CIPHER_PASS
+  PGBACKREST_REPO2_S3_KEY
+  PGBACKREST_REPO2_S3_KEY_SECRET
+  PGBACKREST_REPO2_CIPHER_PASS
+  MAIL_BACKUP_SCALEWAY_ACCESS_KEY
+  MAIL_BACKUP_SCALEWAY_SECRET_KEY
+  MAIL_BACKUP_HETZNER_ACCESS_KEY
+  MAIL_BACKUP_HETZNER_SECRET_KEY
+  MAIL_BACKUP_B2_ACCESS_KEY
+  MAIL_BACKUP_B2_SECRET_KEY
+  MAIL_BACKUP_SIGNING_PRIVATE_KEY
+  MAIL_BACKUP_SIGNING_PUBLIC_KEY
 )
 unset "${known_secret_names[@]}" "${allowed_names[@]}"
 
@@ -88,13 +131,19 @@ else
   exit "${decrypt_pipeline_status}"
 fi
 
-for name in "${allowed_names[@]}"; do
+for name in "${required_names[@]}"; do
   if [[ -z ${selected_values[$name]+present} ]]; then
     printf 'Required secret is missing from %s: %s\n' "${secrets_file}" "${name}" >&2
     exit 1
   fi
   printf -v "${name}" '%s' "${selected_values[$name]}"
   export "${name}"
+done
+for name in "${optional_names[@]}"; do
+  if [[ -n ${selected_values[$name]+present} ]]; then
+    printf -v "${name}" '%s' "${selected_values[$name]}"
+    export "${name}"
+  fi
 done
 unset selected_values
 

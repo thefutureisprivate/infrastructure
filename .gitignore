@@ -4,6 +4,7 @@
 !.env.example
 /SOPS/infrastructure.yaml
 /SOPS/mail.yaml
+/.age/*.key
 .ansible
 
 # Generated artifacts
@@ -23,8 +24,10 @@
 crash.log
 crash.*.log
 /OpenTofu/terraform.tfvars
+/OpenTofu/backend.hcl
+/OpenTofu/bootstrap/terraform.tfvars
 /OpenTofu/*.auto.tfvars
-/OpenTofu/stalwart-dkim.generated.tfvars.json
+/OpenTofu/state-snapshots/
 
 # Ansible
 *.retry

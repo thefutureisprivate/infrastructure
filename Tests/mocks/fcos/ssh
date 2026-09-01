@@ -1,2 +1,8 @@
 #!/usr/bin/env bash
+if [[ -n ${FCOS_TEST_SSH_LOG:-} ]]; then
+  printf '%s\n' "$*" >>"${FCOS_TEST_SSH_LOG}"
+fi
+if [[ ${FCOS_TEST_FAIL_STRICT:-0} == 1 && " $* " == *' StrictHostKeyChecking=yes '* ]]; then
+  exit 255
+fi
 exit 0

@@ -64,7 +64,8 @@ the temporary management endpoint, so Stalwart never requests deSEC authority
 for POP3, ManageSieve, cleartext IMAP, or cleartext submission SRV records. It
 performs the staging-to-production transition only on the first rollout: it
 returns certificate management to Manual, deletes only the verified staging
-certificate for the public hostname, and enables the production provider. The
+certificate for the public hostname, enables the production provider, and
+retires the staging provider after the production certificate is verified. The
 automatically scheduled production issuance can no longer be postponed by
 Stalwart's valid-certificate freshness guard.
 
@@ -82,7 +83,11 @@ of pretending the active recovery credential was revoked; repair with
 Ansible verifies Web UI v1.0.8 against SHA-256
 `a3904b571aacca815eee2c38dd86de510d53304babe50b9576760bf70a36c0bf`
 before mounting it read-only. Store the regular administrator's unique password
-in a password manager. Port 8080 is never exposed publicly.
+in a password manager. Port 8080 is never exposed publicly. For an enrolled
+installation, the temporary host-loopback publication forwards port 8080 to
+Stalwart's TLS listener on 443 and the CLI validates the public hostname. Only
+a first enrollment forwards it to Stalwart's initial cleartext listener; that
+traffic remains inside the authenticated SSH channel.
 
 ## Declarative Hardening
 
@@ -138,6 +143,8 @@ Account › Credentials › API Keys. Name it `infrastructure-hardening`, use
 - `sysJmapUpdate`;
 - `sysAuthenticationGet`;
 - `sysAuthenticationUpdate`;
+- `sysReportSettingsGet`;
+- `sysReportSettingsUpdate`;
 - `sysWebDavGet`;
 - `sysWebDavUpdate`;
 - `sysMtaStageAuthGet`;
@@ -146,6 +153,8 @@ Account › Credentials › API Keys. Name it `infrastructure-hardening`, use
 - `sysMtaStageMailUpdate`;
 - `sysMtaStsGet`;
 - `sysMtaStsUpdate`;
+- `sysDnsResolverGet`;
+- `sysDnsResolverUpdate`;
 - `sysActionCreate`;
 - `sysApplicationGet`;
 - `sysApplicationCreate`;
@@ -193,6 +202,12 @@ strategy must be exactly `default`, without retry-dependent alternatives, and
 that named strategy must keep `allowInvalidCerts` false. Drift in either object
 fails `make stalwart-audit`.
 
+The MTA resolver is pinned to Stalwart's Cloudflare backend with DNS-over-TLS,
+EDNS, TCP fallback, and intermediate preservation enabled. DANE validation
+therefore receives complete DNSSEC responses directly instead of depending on
+Podman's embedded bridge-network DNS forwarder. The host independently retains
+its fail-closed systemd-resolved DNSSEC and DNS-over-TLS policy.
+
 The authentication singleton explicitly uses Argon2id, requires passwords of at
 least 16 characters with Stalwart's `four` zxcvbn strength, and permits at most
 two API keys and three application passwords per account. Existing credentials
@@ -204,6 +219,13 @@ already known to comply. IMAP is limited to eight concurrent connections and
 concurrent requests, 10,000,000-byte request bodies, and 16 method calls per
 request. The HTTP singleton separately retains its authenticated and anonymous
 per-minute request limits.
+
+The global report settings intercept reports addressed to the dedicated
+`reports@thefutureisprivate.dev` Group and enable forwarding. Stalwart parses
+DMARC and TLS aggregate reports into the Reports UI while also retaining the
+original messages in the Group mailbox. OpenTofu directs CAA incidents to the
+Group's `caa@thefutureisprivate.dev` alias because Stalwart does not analyse
+CAA incident reports.
 
 The apply command first reads the live settings. It performs no mutation when
 they already match, validates the plan before changing drifted settings, and
@@ -275,13 +297,21 @@ The committed declaration configures the `thefutureisprivate.dev` Domain to:
 - select automatic DNS management;
 - select the deSEC provider;
 - set the origin to `thefutureisprivate.dev`;
-- publish `dkim`, `tlsa`, `spf`, `mx`, `srv`, `mtaSts`, `autoConfig`, and
-  `autoDiscover`;
-- disable legacy autoconfiguration and delete its stale `autoconfig` CNAME
-  before revoking that owner name from the Stalwart deSEC token;
-- leave native `caa`, `dmarc`, and `tlsRpt` publication disabled because
-  OpenTofu owns those policy RRsets and can assign a distinct report address
-  to each class;
+- publish `dkim`, `tlsa`, `spf`, `mx`, `dmarc`, `srv`, `mtaSts`, `tlsRpt`,
+  `autoConfig`, `autoConfigLegacy`, and `autoDiscover` records. Stalwart emits
+  the `mtaSts` and `autoConfig`
+  CNAME/TXT pairs atomically, so its exact-name token policies cover both
+  records in each bundle while OpenTofu asserts the canonical CNAME targets;
+- derive MX, SPF, the enabled TLS-only service SRVs, and Outlook
+  `autodiscover` from the same live service model that serves them;
+- retain Stalwart-managed Mozilla autoconfiguration only at the exact
+  `autoconfig` CNAME for Thunderbird compatibility;
+- request one certificate covering `mail`, `mta-sts`, `autoconfig`,
+  `autodiscover`, and `ua-auto-config`, and verify each discovery document over
+  trusted TLS on both IPv4 and IPv6 before bootstrap succeeds;
+- enable native `dmarc` and `tlsRpt` publication with the shared Domain report
+  address `mailto:reports@thefutureisprivate.dev`, while leaving native `caa`
+  publication disabled under OpenTofu ownership;
 - restrict deSEC TLSA grants to the enabled public listeners at
   `_25._tcp.mail`, `_443._tcp.mail`, `_465._tcp.mail`, `_993._tcp.mail`, and
   `_443._tcp.mta-sts`.
@@ -289,26 +319,26 @@ The committed declaration configures the `thefutureisprivate.dev` Domain to:
 The child token is source-address restricted and grants only the exact
 owner-name/type pairs declared by OpenTofu. The bootstrap first creates the
 Domain with manual DNS and certificate management so Stalwart can generate its
-keys without publishing. It queries every active or retiring selector, writes
-them to ignored `OpenTofu/stalwart-dkim.generated.tfvars.json`, applies only the
-matching deSEC token policies, and only then enables automatic publication.
-Normal `make plan` runs automatically include that generated file, preventing
-a later full plan from deleting the selector grants.
+keys without publishing. It compares every live selector and the ACME account
+to the reviewed `OpenTofu/stalwart-authority.tfvars.json`; workload discovery
+cannot expand DNS or certificate authority. Only after that comparison passes
+does it enable automatic publication.
 
-Re-run `make stalwart-bootstrap` after a DKIM rotation creates a replacement
-selector; it resynchronizes the exact selector set before retrying automatic
-publication. Remove a retired selector grant only after Stalwart has completed
-the rollover and no longer returns that key. A denied record requires a
-reviewed policy change; never add a type-only or wildcard grant.
+Before a DKIM rotation, add the exact replacement selector to the reviewed
+authority file and apply its narrow policy. Re-run `make stalwart-bootstrap`,
+then remove a retired selector grant only after Stalwart no longer returns that
+key. A denied record requires a reviewed policy change; never add a type-only
+or wildcard grant.
 
 On an already-production Domain, the bootstrap briefly transitions only DNS
 management to manual immediately before restoring automatic DNS. Certificate
 management stays automatic and bound to the production provider. Stalwart
 v0.16.19 queues a managed DNS reconciliation on that manual-to-automatic
 transition; an automatic-to-automatic upsert alone does not retry a failed DNS
-task. The bootstrap then waits until deSEC's
-authoritative 3-1-1 SMTP TLSA matches the SPKI digest served over both IPv4 and
-IPv6. Because Stalwart treats even a transient deSEC 5xx response as a
+task. The bootstrap then reads the 3-1-1 SMTP TLSA through the authenticated
+deSEC API and compares it with the Web-PKI- and hostname-verified SMTP
+certificate served over both IPv4 and IPv6. Because Stalwart treats even a
+transient deSEC 5xx response as a
 permanently failed DNS task, bootstrap performs up to three bounded
 manual-to-automatic refresh attempts, gives each task a six-minute processing
 window, and skips the transition entirely when the authoritative TLSA already
@@ -328,7 +358,9 @@ The bootstrap creates Let's Encrypt staging and production ACME providers with
 DNS-01 through the same deSEC provider and
 `contact@thefutureisprivate.dev` as the contact. It proves issuance against
 staging only when the managed Domain did not exist when the command began,
-then switches the Domain to production and waits for a trusted certificate.
+then switches the Domain to production, waits for a trusted certificate, and
+deletes the now-unreferenced staging provider. Existing installations also
+retire any staging provider left by an interrupted earlier enrollment.
 Every rerun keeps the production provider selected even if a public IPv4,
 IPv6, or MTA-STS probe fails transiently. A DNS reconciliation retry uses a
 separate manual-DNS declaration whose certificate management remains bound to
@@ -345,16 +377,21 @@ which has this production shape:
 https://acme-v02.api.letsencrypt.org/acme/acct/<ACCOUNT_ID>
 ```
 
-The bootstrap writes the URI to the ignored generated OpenTofu input. On the
-first rollout it switches the `mail` CAA RRset from staging to production
-before production issuance; reruns keep the production account URI throughout.
+The bootstrap requires the URI to equal the reviewed controller-authority
+input. On the first rollout it switches the `mail` CAA RRset from staging to
+production before production issuance; reruns keep the production account URI
+throughout.
 That RRset is critical, binds both the account URI and `dns-01`, and explicitly
 denies wildcard issuance. The critically denying apex remains separate.
-Stalwart's `publishRecords.caa`, `publishRecords.dmarc`, and
-`publishRecords.tlsRpt` are disabled, and its deSEC token has no permission for
-those records. `mta-sts` is a CNAME to `mail`, so both explicit SANs use the
-same CAA exception. This split is necessary because Stalwart v0.16 exposes one
-shared Domain reporting URI for DMARC, TLS-RPT, and native CAA publication.
+Stalwart's MX, SPF, SRV, Autodiscover, DMARC, and TLS-RPT publication switches
+are enabled with exact deSEC owner/type grants for every generated RRset.
+`publishRecords.caa` remains disabled and the child token has no CAA permission.
+Stalwart publishes the shared Domain report URI for DMARC and TLS-RPT, while
+OpenTofu keeps CAA incidents on the separate `caa@` alias. The `mta-sts`,
+`autoconfig`, `autodiscover`, and
+`ua-auto-config` CNAMEs all target `mail`, so every explicit discovery SAN uses
+the same CAA exception. This split gives Stalwart native ownership of its mail
+DNS while retaining controller ownership of CAA.
 
 Production never points Stalwart at a remote Web UI updater. Ansible verifies
 the exact upstream bytes before installing them, the Quadlet mounts the bundle
@@ -365,24 +402,29 @@ checksum, and declarative-plan change followed by deployment and live audit.
 ## Production DNS State
 
 Proton Mail is not part of the declared production configuration. Stalwart's
-automatic DNS task owns the apex MX and SPF records, DKIM, service discovery,
-TLSA, and MTA-STS records, including the `mta-sts` endpoint alias and
-`_mta-sts` policy identifier. OpenTofu owns the critically denying apex CAA
-RRset, the narrowly authorized `mail` exception, DMARC, and TLS-RPT. Stalwart
-retains no write authority over those four policy RRsets.
+automatic DNS task owns MX, SPF, the enabled service SRVs, Autodiscover, DKIM,
+DMARC, TLS-RPT, TLSA, and MTA-STS records, including the `mta-sts` endpoint
+alias and `_mta-sts` policy identifier.
+OpenTofu owns the critically denying apex CAA RRset and the narrowly authorized
+`mail` exception. Stalwart retains no write authority over either CAA RRset.
 
-Create `caa@thefutureisprivate.dev`, `dmarc@thefutureisprivate.dev`, and
-`tls-rpt@thefutureisprivate.dev` as aliases in the Web UI before publishing the
-records. They can target the existing `contact@thefutureisprivate.dev`
-mailbox, while preserving distinct envelope recipients for filtering. Account
-and alias lifecycle intentionally remains a Web UI operation. The resulting
+Create a Group named `reports` with the address
+`reports@thefutureisprivate.dev` and the alias
+`caa@thefutureisprivate.dev` in the Web UI before publishing the records.
+Add the administrator account as a member, give the Group a modest dedicated
+quota, and do not assign it an administrative role. A Group has its own shared
+mailbox and cannot log in directly, avoiding another interactive credential.
+Account and Group lifecycle intentionally remains a Web UI operation.
+`ReportSettings.inboundReportAddresses` contains only this address and
+`inboundReportForwarding` remains enabled, so DMARC and TLS reports are both
+analysed in the Reports UI and retained in the shared mailbox. The resulting
 destinations are:
 
 | Report class | Address |
 | --- | --- |
 | CAA `iodef` incidents | `caa@thefutureisprivate.dev` |
-| DMARC aggregate reports | `dmarc@thefutureisprivate.dev` |
-| SMTP TLS aggregate reports | `tls-rpt@thefutureisprivate.dev` |
+| DMARC aggregate reports | `reports@thefutureisprivate.dev` |
+| SMTP TLS aggregate reports | `reports@thefutureisprivate.dev` |
 | ACME and administrative contact | `contact@thefutureisprivate.dev` |
 
 Review the generated zone file before each DNS task, monitor the task result,
@@ -392,9 +434,9 @@ CardDAV, WebDAV, DKIM, SPF, DMARC, MTA-STS, and TLS-RPT externally after
 changes.
 
 Legacy Proton MX, SPF, verification, DKIM, and MTA-STS records must not be
-restored as active configuration. Backups are explicitly deferred; production
-mail should not become the only copy of irreplaceable data until
-application-consistent offsite backups exist.
+restored as active configuration. Production cutover requires successful
+initialization and restore testing of the independently encrypted offsite
+PostgreSQL repositories described in [Operations](Operations.md).
 
 Stalwart's current DNS model and supported record set are documented in its
 [automatic DNS management guide](https://stalw.art/docs/domains/dns-records/),

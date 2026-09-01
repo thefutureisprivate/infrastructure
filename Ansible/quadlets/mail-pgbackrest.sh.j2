@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+operation=${1:-}
+case "${operation}" in
+  init|check|full|diff) ;;
+  *)
+    printf 'Usage: %s {init|check|full|diff}\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
+run_pgbackrest() {
+  /usr/bin/podman exec --user 70 mail-postgres \
+    pgbackrest --stanza=stalwart "$@"
+}
+
+case "${operation}" in
+  init)
+    run_pgbackrest stanza-create
+    run_pgbackrest check
+    ;;
+  check)
+    run_pgbackrest check
+    for repository in 1 2; do
+      run_pgbackrest --repo="${repository}" info --output=json >/dev/null
+    done
+    ;;
+  full|diff)
+    failed=0
+    for repository in 1 2; do
+      if ! run_pgbackrest --repo="${repository}" --type="${operation}" backup; then
+        failed=1
+      fi
+    done
+    exit "${failed}"
+    ;;
+esac

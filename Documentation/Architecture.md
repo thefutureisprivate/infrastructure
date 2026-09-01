@@ -17,9 +17,9 @@ The design favors:
 - a small public network surface over feature-complete port exposure;
 - defense in depth over maximum database or network throughput.
 
-High availability, multi-region replication, outbound mail reputation
-management, application-level backup automation, and full Stalwart policy
-configuration are outside the current repository scope.
+High availability, synchronous multi-region replication, outbound mail
+reputation management, and full Stalwart policy configuration are outside the
+current repository scope.
 
 ## System Overview
 
@@ -38,6 +38,9 @@ flowchart LR
   hardening["Stalwart declarative plan"]
   stalwart["Stalwart / runsc"]
   postgres["PostgreSQL / runsc"]
+  backups["pgBackRest + age backup jobs"]
+  hot["Hetzner + B2 encrypted hot repositories"]
+  cold["Scaleway encrypted Glacier archive"]
 
   operator --> age
   operator --> butane
@@ -54,6 +57,12 @@ flowchart LR
   ansible --> quadlet
   quadlet --> stalwart
   quadlet --> postgres
+  quadlet --> backups
+  postgres --> backups
+  backups --> hot
+  backups --> cold
+  tofu -->|"Buckets, policies, runtime identities"| hot
+  tofu -->|"Object lock, lifecycle, write-only identity"| cold
   age --> hardening
   hardening -->|"Scoped management API key"| stalwart
   fcos --> quadlet
@@ -65,12 +74,12 @@ flowchart LR
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | `Butane/` | Mail-independent first-boot user, SSH policy, kernel and sysctl hardening, masked services, gVisor installation | Cloud resources, host roles, or application configuration |
-| `OpenTofu/` | Hetzner servers, shared base firewall, role firewall, placement, backups, protection, per-node reverse DNS, selected shared deSEC RRsets, A/AAAA records, CAA, DMARC, TLS-RPT, and the exact-name Stalwart token | Zone lifecycle and authorized mail-domain record contents managed natively by Stalwart |
+| `OpenTofu/` | Hetzner servers, shared base firewall, role firewall, placement, protected backup buckets and runtime identities, encrypted remote state, per-node reverse DNS, selected shared deSEC RRsets, A/AAAA records, CAA, and the exact-name Stalwart token | Zone lifecycle and authorized mail-domain record contents managed natively by Stalwart |
 | `Scripts/install-fcos*.sh` | Guarded Rescue activation, hash-checked installer transport, direct FCOS disk installation, and installation-state transition | Cloud resource declaration, application secrets, or running-host reconciliation |
 | `SOPS/` | Encrypted provider and application credentials, age recipient policy, secret handoff helpers | Infrastructure state or persistent application data |
-| `Ansible/` | Group-scoped Podman secrets, Quadlet source files, support files, networks, volumes, and service reconciliation | Host boot configuration or cloud lifecycle |
+| `Ansible/` | Group-scoped Podman secrets, Quadlet source files, backup image and jobs, systemd timers, networks, volumes, and service reconciliation | Host boot configuration or cloud lifecycle |
 | `Stalwart/` | Declarative server identity, Domain, deSEC and staged ACME bootstrap, exact TLS listeners, verified local Web UI Application, password policy, protocol and queue resource limits, HTTP security headers and CSP, and SMTP authentication policy | Accounts, mailbox data, or unrelated DNS records |
-| Stalwart | Mail service configuration and explicitly authorized DNS owner/type pairs, including inbound SMTP TLSA | Zone lifecycle, CAA, DMARC, TLS-RPT, HTTPS records, unrelated names, address records, reverse DNS, or token management |
+| Stalwart | Mail service configuration and explicitly authorized DNS owner/type pairs, including MX, SPF, SRV, Autodiscover, inbound SMTP TLSA, DMARC, and TLS-RPT | Zone lifecycle, CAA, HTTPS records, unrelated names, address records, reverse DNS, or token management |
 | PostgreSQL | Stalwart relational data | Host networking or external database access |
 
 ## Provisioning Lifecycle
@@ -88,9 +97,10 @@ flowchart LR
    the server disk, embeds Ignition, sets the Hetzner platform ID, and enables
    initramfs DHCP so Afterburn can reach Hetzner's link-local metadata service.
    No temporary server, snapshot, or cloud-init path exists.
-4. The controller power-cycles the server, verifies an FCOS ostree boot over
-   SSH, and changes only the ignored installation marker to `installed`.
-   Repeated runs skip it; a destructive reinstall requires an explicit
+4. The controller power-cycles the server and leaves the marker at
+   `awaiting-verification`. It changes the marker to `installed` only after a
+   strict SSH connection matches the independently verified permanent host-key
+   pin and proves the FCOS ostree boot plus gVisor. Repeated runs skip it; a destructive reinstall requires an explicit
    override. Hetzner continues to report the creation-time native image as
    server metadata even though the local disk now contains FCOS; the
    `servers.bootstrap_image` output names that distinction explicitly.
@@ -141,17 +151,20 @@ already installed host; rebuild the server when those files change.
 
 | Service | Host exposure | Persistent state | Runtime |
 | --- | --- | --- | --- |
-| PostgreSQL | None; internal `mail-postgres` network only | `mail-postgres-data` named volume | gVisor `runsc` |
+| PostgreSQL | No published ports; internal database network plus backup egress when enabled | `mail-postgres-data` named volume | gVisor `runsc` |
 | Stalwart SMTP federation | TCP 25, mandatory STARTTLS 1.2/1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart HTTPS/JMAP/CalDAV/CardDAV/WebDAV/admin | TCP 443, TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart submission | TCP 465, implicit TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
 | Stalwart IMAP | TCP 993, implicit TLS 1.3 | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
-| Stalwart bootstrap HTTP | Temporary `127.0.0.1:8080` opt-in only | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
+| Stalwart bootstrap recovery | Temporary `127.0.0.1:8080` opt-in; TLS-to-443 when enrolled, HTTP-to-8080 only for first enrollment | PostgreSQL and `mail-stalwart-data` | gVisor `runsc` |
+| Physical backup/WAL archiving | Outbound S3-compatible HTTPS only | Encrypted Hetzner and B2 objects plus local WAL spool | PostgreSQL container under gVisor; systemd timers |
+| Logical cold backup | Outbound Scaleway S3 HTTPS only | Age-encrypted logical object transitioned to Glacier | One-shot gVisor container |
 
 Both containers have read-only root filesystems, no-new-privileges, and explicit
 writable volumes or tmpfs mounts. Stalwart alone joins the externally routed
 dual-stack network; it reaches PostgreSQL over a second Podman network marked
-internal, while PostgreSQL joins only that database network. Stalwart's storage
+internal. When backups are enabled, PostgreSQL also joins an egress-only bridge
+with no published ports; the logical job joins both networks. Stalwart's storage
 configuration references the PostgreSQL password by environment-variable name,
 and the restricted deSEC token is available for the later Stalwart DNS
 configuration. PostgreSQL receives its password through a mounted Podman
@@ -170,20 +183,22 @@ OpenTofu creates a child token with:
 
 - a default-deny policy;
 - write access only to the exact reviewed mail owner-name/type pairs;
-- DKIM access only for exact selectors supplied by the ignored generated
-  `stalwart_dkim_selectors` override;
-- no wildcard, unrelated-name, or A/AAAA permission; TLSA access is limited to
-  the five exact public TLS listener names, and there is no CAA, DMARC, or
-  TLS-RPT access;
+- DKIM access only for exact selectors supplied by the reviewed
+  `OpenTofu/stalwart-authority.tfvars.json` input;
+- no wildcard, unrelated-name, A/AAAA, or CAA permission; MX/SPF, SRV,
+  Autodiscover, TLSA, DMARC, and TLS-RPT access is limited to the exact names
+  and types generated by the enabled Stalwart services;
 - authentication restricted to the mail server's public IPv4 and IPv6
   addresses;
 - no domain creation, domain deletion, or token-management permission.
 
 OpenTofu keeps ownership of A, AAAA, Hetzner PTR, selected non-mail records,
-both CAA RRsets, DMARC, and TLS-RPT so Stalwart cannot redirect the host
-identity, combine report destinations, or expand its own authority. The
-bootstrap reads Stalwart's registered account URI and feeds
-that public value into the ignored generated OpenTofu input. The exact
+and both CAA RRsets so Stalwart cannot redirect the host identity or CAA
+incident destination, or expand its own authority. Stalwart owns only the exact
+mail-routing, authentication, discovery, and reporting RRsets generated from
+its live Domain and SystemSettings objects. The
+bootstrap reads Stalwart's registered account URI and requires it to match
+that reviewed controller authority before continuing. The exact
 ownership split is recorded in [DNS Ownership](DNS.md).
 
 ## State and Data
@@ -193,14 +208,15 @@ ownership split is recorded in [DNS Ownership](DNS.md).
 | Provider credentials | `SOPS/infrastructure.sops.yaml` | SOPS-encrypted to committed age recipients |
 | Mail credentials | `SOPS/mail.sops.yaml` | SOPS-encrypted to committed age recipients |
 | Stalwart hardening API key | `SOPS/mail.sops.yaml` | Replace-mode permissions limited to the declaratively managed object types; supplied only to the local CLI process |
-| deSEC child token | OpenTofu state and encrypted mail scope | Sensitive output plus SOPS encryption; state itself must be protected separately |
-| OpenTofu state | Local by default | Ignored by Git; use an encrypted, access-controlled remote backend for shared automation |
+| Generated runtime credentials | OpenTofu state and encrypted mail scope | AES-GCM encrypted state plus SOPS; B2 and Scaleway runtime identities remain separate |
+| OpenTofu state | Authoritative versioned Scaleway S3 backend plus local recovery snapshots | Backend objects use client-side PBKDF2/SHA-512 and AES-GCM encryption; timestamped local snapshots are separately SOPS/age-encrypted and are never an active backend |
 | Generated inventory and host keys | `Ansible/inventory/` | Ignored by Git; inventory mode is `0600` |
 | Podman secret hashes | `/var/lib/quadlet-secrets` | Root-only; contains hashes, not plaintext values |
-| Application data | Rootful Podman named volumes | Protected by host access controls and Hetzner backup policy |
+| Application data | PostgreSQL named volume | Two independently encrypted pgBackRest PITR repositories plus signed age-encrypted logical archives at all three providers |
 
-The age private identity is workstation authority. It is never committed and
-must be backed up securely outside this repository.
+The SOPS age private identity is workstation authority. The separate
+cold-backup age identity, OpenTofu passphrase, and both pgBackRest passphrases
+are recovery authorities. None is committed; all require tested offline custody.
 
 ## Architecture Constraints
 

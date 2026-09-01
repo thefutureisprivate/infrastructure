@@ -3,6 +3,8 @@ Description=Stalwart mail server
 Documentation=https://stalw.art/docs/install/platform/docker/
 Requires=gvisor-install.service mail-postgres.service
 After=gvisor-install.service mail-postgres.service network-online.target
+StartLimitIntervalSec=10min
+StartLimitBurst=5
 
 [Container]
 Image={{ mail_stalwart_image }}
@@ -26,7 +28,11 @@ PublishPort=465:465
 PublishPort=993:993
 {% if mail_stalwart_bootstrap_listener | bool %}
 Secret={{ mail_stalwart_bootstrap_secret_name }},type=env,target=STALWART_RECOVERY_ADMIN
+{% if mail_stalwart_bootstrap_tls | bool %}
+PublishPort=127.0.0.1:8080:443
+{% else %}
 PublishPort=127.0.0.1:8080:8080
+{% endif %}
 {% endif %}
 NoNewPrivileges=true
 DropCapability=all
@@ -44,6 +50,11 @@ HealthOnFailure=kill
 [Service]
 Restart=always
 RestartSec=5s
+MemoryHigh=1536M
+MemoryMax=2G
+MemorySwapMax=0
+CPUQuota=200%
+TasksMax=512
 TimeoutStartSec=900
 TimeoutStopSec=180
 

@@ -1,5 +1,31 @@
 ---
-# Application credentials are exposed only to the Ansible mail deployment.
+# PostgreSQL administration is isolated from the Stalwart application login.
+MAIL_POSTGRES_ADMIN_PASSWORD: "replace-with-a-distinct-32-character-random-secret"
 MAIL_POSTGRES_PASSWORD: "replace-with-at-least-32-random-characters"
+MAIL_POSTGRES_DUMP_PASSWORD: "replace-with-a-distinct-32-character-random-secret"
 # Least-privilege Stalwart API key used only for declarative hardening.
 STALWART_CONFIG_API_TOKEN: "replace-after-creating-the-scoped-stalwart-api-key"
+# Independent repository encryption passphrases are required even though the
+# providers also encrypt disks. Keep offline recovery copies of both.
+PGBACKREST_REPO1_CIPHER_PASS: "replace-with-at-least-32-random-characters"
+# These B2 values are replaced by make sops-mail-sync-backup after apply.
+PGBACKREST_REPO2_S3_KEY: "replace-after-opentofu-creates-the-b2-runtime-key"
+PGBACKREST_REPO2_S3_KEY_SECRET: "replace-after-opentofu-creates-the-b2-runtime-secret"
+PGBACKREST_REPO2_CIPHER_PASS: "replace-with-an-independent-32-character-random-secret"
+# These Scaleway values are also synchronized from encrypted OpenTofu state.
+MAIL_BACKUP_SCALEWAY_ACCESS_KEY: "replace-after-opentofu-creates-the-scaleway-runtime-key"
+MAIL_BACKUP_SCALEWAY_SECRET_KEY: "replace-after-opentofu-creates-the-scaleway-runtime-secret"
+# These Hetzner values are copied from infrastructure SOPS by
+# make sops-mail-sync-backup and serve both pgBackRest and logical uploads.
+MAIL_BACKUP_HETZNER_ACCESS_KEY: "replace-after-syncing-the-hetzner-backup-key"
+MAIL_BACKUP_HETZNER_SECRET_KEY: "replace-after-syncing-the-hetzner-backup-secret"
+# These B2 archive values are synchronized from encrypted OpenTofu state.
+MAIL_BACKUP_B2_ACCESS_KEY: "replace-after-opentofu-creates-the-b2-archive-key"
+MAIL_BACKUP_B2_SECRET_KEY: "replace-after-opentofu-creates-the-b2-archive-secret"
+# Generate this distinct Ed25519 pair with Scripts/generate-backup-signing-key.sh.
+# The private key enters only the no-egress signing job; the uploader receives
+# the public key and cannot forge a candidate by itself. The host runner
+# intentionally promotes a valid signer output, so retained public keys and
+# selection of pre-compromise object versions remain part of recovery.
+MAIL_BACKUP_SIGNING_PRIVATE_KEY: "replace-with-an-ed25519-private-key-in-pem-format"
+MAIL_BACKUP_SIGNING_PUBLIC_KEY: "replace-with-the-matching-ed25519-public-key-in-pem-format"

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+operation=${1:-}
+case "${operation}" in
+  init|check|full|diff|logical) ;;
+  *)
+    printf 'Usage: %s {init|check|full|diff|logical}\n' "$0" >&2
+    exit 2
+    ;;
+esac
+
+lock_path=/var/lib/mail-backup/backup.lock
+exec 9<>"${lock_path}"
+if ! flock --exclusive --wait 21600 9; then
+  printf 'Timed out waiting for the shared mail-backup lock: %s\n' "${operation}" >&2
+  exit 75
+fi
+
+if [[ ${operation} == logical ]]; then
+  /usr/bin/systemctl start --wait mail-backup-logical-upload.service
+  /usr/bin/systemctl start --wait mail-backup-logical-job.service
+  /usr/bin/systemctl start --wait mail-backup-logical-upload.service
+  exit 0
+fi
+
+exec {{ quadlet_directory }}/mail-pgbackrest.sh "${operation}"

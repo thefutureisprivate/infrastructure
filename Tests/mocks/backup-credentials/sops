@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${MOCK_SOPS_LOG:?}"
+
+case ${1:-} in
+  set)
+    (($# == 4)) && [[ $2 == --value-stdin ]]
+    value_json=$(</dev/stdin)
+    printf '%s' "${value_json}" | jq -e 'type == "string"' >/dev/null
+    jq -cn --arg path "$4" --argjson value "${value_json}" \
+      '{path: $path, value: $value}' >>"${MOCK_SOPS_LOG}"
+    ;;
+  unset)
+    (($# == 4)) && [[ $2 == --idempotent ]]
+    jq -cn --arg path "$4" '{path: $path, unset: true}' >>"${MOCK_SOPS_LOG}"
+    ;;
+  *)
+    printf 'Unexpected sops mock invocation: %s\n' "$*" >&2
+    exit 2
+    ;;
+esac

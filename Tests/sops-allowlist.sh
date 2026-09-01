@@ -14,14 +14,37 @@ SOPS_SECRETS_FILE="${test_root}/secrets.sops.yaml" \
 HCLOUD_TOKEN="inherited-cloud-token" \
 DESEC_API_TOKEN="inherited-dns-token" \
 MAIL_POSTGRES_PASSWORD="inherited-mail-token" \
+MAIL_POSTGRES_ADMIN_PASSWORD="inherited-mail-admin-token" \
+MAIL_POSTGRES_DUMP_PASSWORD="inherited-mail-dump-token" \
+PGBACKREST_REPO1_CIPHER_PASS="inherited-backup-token" \
+MAIL_BACKUP_HETZNER_ACCESS_KEY="inherited-archive-token" \
+MAIL_BACKUP_B2_SECRET_KEY="inherited-b2-archive-token" \
+AWS_ACCESS_KEY_ID="inherited-s3-access-key" \
+AWS_SECRET_ACCESS_KEY="inherited-s3-secret-key" \
+AWS_SESSION_TOKEN="inherited-s3-session-token" \
   bash "${repo_root}/SOPS/exec-env.sh" --allow HCLOUD_TOKEN -- \
   bash -c '
     [[ ${HCLOUD_TOKEN:-} == selected-cloud-token ]]
     [[ -z ${DESEC_API_TOKEN+x} ]]
     [[ -z ${MAIL_POSTGRES_PASSWORD+x} ]]
+    [[ -z ${MAIL_POSTGRES_ADMIN_PASSWORD+x} ]]
+    [[ -z ${MAIL_POSTGRES_DUMP_PASSWORD+x} ]]
     [[ -z ${STALWART_DESEC_API_TOKEN+x} ]]
     [[ -z ${STALWART_CONFIG_API_TOKEN+x} ]]
+    [[ -z ${PGBACKREST_REPO1_CIPHER_PASS+x} ]]
+    [[ -z ${MAIL_BACKUP_HETZNER_ACCESS_KEY+x} ]]
+    [[ -z ${MAIL_BACKUP_B2_SECRET_KEY+x} ]]
+    [[ -z ${TOFU_STATE_PASSPHRASE+x} ]]
+    [[ -z ${AWS_ACCESS_KEY_ID+x} ]]
+    [[ -z ${AWS_SECRET_ACCESS_KEY+x} ]]
+    [[ -z ${AWS_SESSION_TOKEN+x} ]]
   '
+
+PATH="${repo_root}/Tests/mocks:${PATH}" \
+SOPS_SECRETS_FILE="${test_root}/secrets.sops.yaml" \
+  bash "${repo_root}/SOPS/exec-env.sh" --allow HCLOUD_TOKEN \
+  --optional PGBACKREST_REPO1_CIPHER_PASS -- \
+  bash -c '[[ ${HCLOUD_TOKEN} == selected-cloud-token ]] && [[ -z ${PGBACKREST_REPO1_CIPHER_PASS+x} ]]'
 
 if PATH="${repo_root}/Tests/mocks:${PATH}" \
   SOPS_SECRETS_FILE="${test_root}/secrets.sops.yaml" \

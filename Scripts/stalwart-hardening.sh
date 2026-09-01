@@ -3,12 +3,13 @@ set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "${script_dir}/.." && pwd)
+# shellcheck source=Scripts/lib/stalwart-security.sh
+source "${script_dir}/lib/stalwart-security.sh"
 compose_file="${repo_root}/Ansible/compose.yaml"
 plan_file="${repo_root}/Stalwart/hardening.ndjson"
 mta_sts_plan_file="${repo_root}/Stalwart/mta-sts.ndjson"
 stalwart_url=${STALWART_URL:-https://mail.thefutureisprivate.dev}
 mta_sts_url=${MTA_STS_URL:-https://mta-sts.thefutureisprivate.dev/.well-known/mta-sts.txt}
-runtime=${STALWART_CLI_RUNTIME:-}
 runtime_token_secret=''
 
 cleanup() {
@@ -16,7 +17,7 @@ cleanup() {
   trap - EXIT HUP INT TERM
   unset STALWART_CONFIG_API_TOKEN STALWART_TOKEN STALWART_URL
   if [[ -n ${runtime_token_secret} ]]; then
-    if ! container_engine podman secret rm "${runtime_token_secret}" >/dev/null 2>&1; then
+    if ! stalwart_podman secret rm "${runtime_token_secret}" >/dev/null 2>&1; then
       printf 'Failed to remove transient Podman secret %s; remove it manually.\n' \
         "${runtime_token_secret}" >&2
       status=1
@@ -67,44 +68,7 @@ if [[ ${STALWART_CONFIG_API_TOKEN} == replace-* ]]; then
   exit 1
 fi
 
-if [[ -z ${runtime} ]]; then
-  if command -v podman >/dev/null 2>&1; then
-    runtime=podman
-  elif command -v docker >/dev/null 2>&1; then
-    runtime=docker
-  else
-    printf 'Podman or Docker is required to run the pinned Stalwart CLI\n' >&2
-    exit 1
-  fi
-fi
-if [[ ${runtime} != podman && ${runtime} != docker ]]; then
-  printf 'STALWART_CLI_RUNTIME must be podman or docker\n' >&2
-  exit 1
-fi
-if ! command -v "${runtime}" >/dev/null 2>&1; then
-  printf 'Configured container runtime is unavailable: %s\n' "${runtime}" >&2
-  exit 1
-fi
-
-container_engine() {
-  local engine=$1
-  shift
-  if [[ ${engine} == podman && -n ${CONTAINER_ID:-} ]] && \
-    command -v distrobox-host-exec >/dev/null 2>&1; then
-    distrobox-host-exec podman "$@"
-  else
-    "${engine}" "$@"
-  fi
-}
-
-if ! container_engine "${runtime}" info >/dev/null 2>&1; then
-  if [[ ${runtime} == podman && -n ${CONTAINER_ID:-} ]]; then
-    printf 'The host Podman engine is unreachable through distrobox-host-exec.\n' >&2
-  else
-    printf '%s is installed but its container service is unreachable.\n' "${runtime}" >&2
-  fi
-  exit 1
-fi
+stalwart_require_local_podman
 
 mapfile -t cli_images < <(
   sed -nE 's/^[[:space:]]*image:[[:space:]]*"(docker\.io\/stalwartlabs\/cli:[^"]+)"[[:space:]]*$/\1/p' \
@@ -118,24 +82,19 @@ cli_image=${cli_images[0]}
 
 export STALWART_URL=${stalwart_url}
 
-if [[ ${runtime} == podman ]]; then
-  token_secret_id=$(openssl rand -hex 16)
-  if [[ ! ${token_secret_id} =~ ^[0-9a-f]{32}$ ]]; then
-    printf 'OpenSSL did not generate the expected token-secret identifier.\n' >&2
-    exit 1
-  fi
-  runtime_token_secret="stalwart-hardening-token-${token_secret_id}"
-  if ! printf '%s' "${STALWART_CONFIG_API_TOKEN}" | \
-    container_engine podman secret create "${runtime_token_secret}" - >/dev/null; then
-    runtime_token_secret=''
-    printf 'Failed to create the transient host-Podman API-token secret.\n' >&2
-    exit 1
-  fi
-  unset STALWART_CONFIG_API_TOKEN
-else
-  export STALWART_TOKEN=${STALWART_CONFIG_API_TOKEN}
-  unset STALWART_CONFIG_API_TOKEN
+token_secret_id=$(openssl rand -hex 16)
+if [[ ! ${token_secret_id} =~ ^[0-9a-f]{32}$ ]]; then
+  printf 'OpenSSL did not generate the expected token-secret identifier.\n' >&2
+  exit 1
 fi
+runtime_token_secret="stalwart-hardening-token-${token_secret_id}"
+if ! printf '%s' "${STALWART_CONFIG_API_TOKEN}" | \
+  stalwart_podman secret create "${runtime_token_secret}" - >/dev/null; then
+  runtime_token_secret=''
+  printf 'Failed to create the transient local-Podman API-token secret.\n' >&2
+  exit 1
+fi
+unset STALWART_CONFIG_API_TOKEN
 
 run_cli() {
   local -a container_args=(
@@ -149,15 +108,11 @@ run_cli() {
     --env XDG_CACHE_HOME=/tmp/cache
     --env "STALWART_URL=${STALWART_URL}"
   )
-  if [[ ${runtime} == podman ]]; then
-    container_args+=(
-      --secret "${runtime_token_secret},type=env,target=STALWART_TOKEN"
-    )
-  else
-    container_args+=(--env STALWART_TOKEN)
-  fi
+  container_args+=(
+    --secret "${runtime_token_secret},type=env,target=STALWART_TOKEN"
+  )
   container_args+=("${cli_image}" --no-color "$@")
-  container_engine "${runtime}" "${container_args[@]}"
+  stalwart_podman "${container_args[@]}"
 }
 
 expected_listeners=$(jq -cS -s '
@@ -206,6 +161,9 @@ expected_jmap=$(jq -cS -s '
 expected_authentication=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "Authentication"))[0].value
 ' "${plan_file}")
+expected_report_settings=$(jq -cS -s '
+  map(select(."@type" == "update" and .object == "ReportSettings"))[0].value
+' "${plan_file}")
 expected_webdav=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "WebDav"))[0].value
 ' "${plan_file}")
@@ -218,6 +176,9 @@ expected_mail=$(jq -cS -s '
 expected_mta_sts=$(jq -cS -s '
   map(select(."@type" == "update" and .object == "MtaSts"))[0].value
 ' "${mta_sts_plan_file}")
+expected_dns_resolver=$(jq -cS -s '
+  map(select(."@type" == "update" and .object == "DnsResolver"))[0].value
+' "${plan_file}")
 expected_applications=$(jq -cS -s '
   def managed: {
     enabled, description, resourceUrl, urlPrefix,
@@ -236,14 +197,16 @@ actual_http=''
 actual_imap=''
 actual_jmap=''
 actual_authentication=''
+actual_report_settings=''
 actual_webdav=''
 actual_auth=''
 actual_mail=''
 actual_mta_sts=''
+actual_dns_resolver=''
 actual_applications=''
 
 read_actual_configuration() {
-  local listener_ndjson inbound_throttle_ndjson queue_quota_ndjson tls_strategy_ndjson outbound_strategy_json http_json imap_json jmap_json authentication_json webdav_json auth_json mail_json mta_sts_json application_ndjson
+  local listener_ndjson inbound_throttle_ndjson queue_quota_ndjson tls_strategy_ndjson outbound_strategy_json http_json imap_json jmap_json authentication_json report_settings_json webdav_json auth_json mail_json mta_sts_json dns_resolver_json application_ndjson
 
   listener_ndjson=$(run_cli query NetworkListener \
     --fields name,bind,protocol,overrideProxyTrustedNetworks,useTls,tlsDisableCipherSuites,tlsDisableProtocols,tlsIgnoreClientOrder,tlsImplicit,tlsTimeout,maxConnections \
@@ -271,6 +234,9 @@ read_actual_configuration() {
   authentication_json=$(run_cli get Authentication --fields \
     passwordHashAlgorithm,passwordMinLength,passwordMinStrength,maxApiKeys,maxAppPasswords \
     --json) || return 1
+  report_settings_json=$(run_cli get ReportSettings --fields \
+    inboundReportAddresses,inboundReportForwarding \
+    --json) || return 1
   webdav_json=$(run_cli get WebDav --fields \
     enableAssistedDiscovery,maxLockTimeout,maxLocks,deadPropertyMaxSize,livePropertyMaxSize,requestMaxSize,maxResults \
     --json) || return 1
@@ -283,6 +249,7 @@ read_actual_configuration() {
   mta_sts_json=$(run_cli get MtaSts --fields \
     mode,maxAge,mxHosts \
     --json) || return 1
+  dns_resolver_json=$(run_cli get DnsResolver --json) || return 1
   application_ndjson=$(run_cli query Application --fields \
     enabled,description,resourceUrl,urlPrefix,autoUpdateFrequency,unpackDirectory,oauthClientId \
     --json) || return 1
@@ -347,6 +314,9 @@ read_actual_configuration() {
     passwordHashAlgorithm, passwordMinLength, passwordMinStrength,
     maxApiKeys, maxAppPasswords
   }' <<<"${authentication_json}")
+  actual_report_settings=$(jq -cS '{
+    inboundReportAddresses, inboundReportForwarding
+  }' <<<"${report_settings_json}")
   actual_webdav=$(jq -cS '{
     enableAssistedDiscovery, maxLockTimeout, maxLocks, deadPropertyMaxSize,
     livePropertyMaxSize, requestMaxSize, maxResults
@@ -363,6 +333,10 @@ read_actual_configuration() {
     {isSenderAllowed} | normalize_conditionals
   ' <<<"${mail_json}")
   actual_mta_sts=$(jq -cS '{mode, maxAge, mxHosts}' <<<"${mta_sts_json}")
+  actual_dns_resolver=$(jq -cS '{
+    "@type": .["@type"], useTls, preserveIntermediates, concurrency,
+    timeout, attempts, tcpOnError, enableEdns
+  }' <<<"${dns_resolver_json}")
   actual_applications=$(jq -cS -s '
     map({
       enabled, description, resourceUrl, urlPrefix,
@@ -381,10 +355,12 @@ configuration_matches() {
     [[ ${actual_imap} == "${expected_imap}" ]] &&
     [[ ${actual_jmap} == "${expected_jmap}" ]] &&
     [[ ${actual_authentication} == "${expected_authentication}" ]] &&
+    [[ ${actual_report_settings} == "${expected_report_settings}" ]] &&
     [[ ${actual_webdav} == "${expected_webdav}" ]] &&
     [[ ${actual_auth} == "${expected_auth}" ]] &&
     [[ ${actual_mail} == "${expected_mail}" ]] &&
     [[ ${actual_mta_sts} == "${expected_mta_sts}" ]] &&
+    [[ ${actual_dns_resolver} == "${expected_dns_resolver}" ]] &&
     [[ ${actual_applications} == "${expected_applications}" ]]
 }
 
@@ -465,14 +441,8 @@ verify_live_mta_sts_policy() {
       --proto '=https' \
       --tlsv1.3 --tls-max 1.3 \
       "${mta_sts_url}") || return 1
-    if ! awk '
-      { sub(/\r$/, "") }
-      $0 == "version: STSv1" { version++ }
-      $0 == "mode: enforce" { mode++ }
-      $0 == "max_age: 604800" { max_age++ }
-      $0 == "mx: mail.thefutureisprivate.dev" { mx++ }
-      END { exit(version == 1 && mode == 1 && max_age == 1 && mx == 1 ? 0 : 1) }
-    ' <<<"${policy}"; then
+    if ! stalwart_mta_sts_policy_matches \
+      'mail.thefutureisprivate.dev' "${policy}"; then
       printf 'MTA-STS policy is not enforcing the expected MX over %s\n' \
         "${address_family}" >&2
       return 1
@@ -592,10 +562,12 @@ audit() {
     show_drift Imap "${expected_imap}" "${actual_imap}"
     show_drift Jmap "${expected_jmap}" "${actual_jmap}"
     show_drift Authentication "${expected_authentication}" "${actual_authentication}"
+    show_drift ReportSettings "${expected_report_settings}" "${actual_report_settings}"
     show_drift WebDav "${expected_webdav}" "${actual_webdav}"
     show_drift MtaStageAuth "${expected_auth}" "${actual_auth}"
     show_drift MtaStageMail "${expected_mail}" "${actual_mail}"
     show_drift MtaSts "${expected_mta_sts}" "${actual_mta_sts}"
+    show_drift DnsResolver "${expected_dns_resolver}" "${actual_dns_resolver}"
     show_drift Application "${expected_applications}" "${actual_applications}"
     return 1
   fi

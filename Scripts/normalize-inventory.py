@@ -28,6 +28,22 @@ def require_keys(value: dict, expected: set[str], path: str) -> None:
         )
 
 
+MAIL_VARIABLES = (
+    "mail_hostname",
+    "mail_backup_enabled",
+    "mail_backup_age_recipient",
+    "mail_backup_hetzner_bucket",
+    "mail_backup_hetzner_endpoint",
+    "mail_backup_hetzner_region",
+    "mail_backup_b2_bucket",
+    "mail_backup_b2_endpoint",
+    "mail_backup_b2_region",
+    "mail_backup_scaleway_bucket",
+    "mail_backup_scaleway_endpoint",
+    "mail_backup_scaleway_region",
+)
+
+
 if len(sys.argv) != 3:
     raise SystemExit(f"Usage: {sys.argv[0]} <input.yml> <output.yml>")
 
@@ -96,11 +112,16 @@ for hostname, variables_value in {**fcos_hosts, **mail_hosts}.items():
 
     allowed_variables = {"ansible_host", "node_key"}
     if hostname in mail_hosts:
-        allowed_variables.add("mail_hostname")
+        allowed_variables.update(MAIL_VARIABLES)
         if not isinstance(variables.get("mail_hostname"), str) or not variables[
             "mail_hostname"
         ]:
             fail(f"mail host {hostname} is missing mail_hostname")
+        if not isinstance(variables.get("mail_backup_enabled"), bool):
+            fail(f"mail host {hostname} has a non-boolean mail_backup_enabled")
+        for variable in MAIL_VARIABLES[2:]:
+            if not isinstance(variables.get(variable), str):
+                fail(f"mail host {hostname} is missing string {variable}")
     unexpected_variables = sorted(variables.keys() - allowed_variables)
     if unexpected_variables:
         fail(
@@ -115,9 +136,10 @@ if set(all_variables) != {"ansible_user"} or not isinstance(
     fail("all.vars must contain only a string ansible_user")
 
 
-def quoted(value: object, path: str) -> str:
-    if not isinstance(value, str) or not value:
-        fail(f"{path} must be a non-empty string")
+def quoted(value: object, path: str, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not allow_empty and not value):
+        qualifier = "a string" if allow_empty else "a non-empty string"
+        fail(f"{path} must be {qualifier}")
     return json.dumps(value, ensure_ascii=True)
 
 
@@ -132,17 +154,22 @@ lines = [
 ]
 for hostname in sorted(mail_hosts):
     variables = mail_hosts[hostname]
-    lines.extend(
-        [
-            f"            {hostname}:",
-            "              ansible_host: "
-            + quoted(variables["ansible_host"], f"{hostname}.ansible_host"),
-            "              node_key: "
-            + quoted(variables["node_key"], f"{hostname}.node_key"),
-            "              mail_hostname: "
-            + quoted(variables["mail_hostname"], f"{hostname}.mail_hostname"),
-        ]
-    )
+    lines.extend([
+        f"            {hostname}:",
+        "              ansible_host: "
+        + quoted(variables["ansible_host"], f"{hostname}.ansible_host"),
+        "              node_key: "
+        + quoted(variables["node_key"], f"{hostname}.node_key"),
+    ])
+    for variable in MAIL_VARIABLES:
+        value = variables[variable]
+        if isinstance(value, bool):
+            rendered_value = "true" if value else "false"
+        else:
+            rendered_value = quoted(
+                value, f"{hostname}.{variable}", allow_empty=True
+            )
+        lines.append(f"              {variable}: {rendered_value}")
 if fcos_hosts:
     lines.append("      hosts:")
     for hostname in sorted(fcos_hosts):

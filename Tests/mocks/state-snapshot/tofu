@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ ${TF_ENCRYPTION:-} == *'method "aes_gcm" "infrastructure_state"'* ]]
+[[ -z ${TOFU_STATE_PASSPHRASE+x} ]]
+
+if [[ ${*: -2} != "state pull" ]]; then
+  printf 'Unexpected mock tofu invocation: %s\n' "$*" >&2
+  exit 2
+fi
+
+cat <<'EOF'
+{"version":4,"terraform_version":"1.12.6","serial":7,"lineage":"state-lineage","outputs":{"credential":{"value":"top-secret-output","type":"string","sensitive":true}},"resources":[{"mode":"managed","type":"example_resource","name":"state_encryption_regression","provider":"provider[\"example.test/provider\"]","instances":[{"schema_version":0,"attributes":{"provider_unencrypted":"must-also-be-encrypted","optional_empty_value":""},"sensitive_attributes":[]}]}],"check_results":null}
+EOF

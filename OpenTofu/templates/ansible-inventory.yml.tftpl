@@ -9,6 +9,17 @@ all:
               ansible_host: ${jsonencode(mail_node.connection_host)}
               node_key: ${jsonencode(mail_node.key)}
               mail_hostname: ${jsonencode(mail_hostname)}
+              mail_backup_enabled: ${jsonencode(mail_backup.enabled)}
+              mail_backup_age_recipient: ${jsonencode(mail_backup.age_recipient)}
+              mail_backup_hetzner_bucket: ${jsonencode(mail_backup.hetzner_bucket)}
+              mail_backup_hetzner_endpoint: ${jsonencode(mail_backup.hetzner_endpoint)}
+              mail_backup_hetzner_region: ${jsonencode(mail_backup.hetzner_region)}
+              mail_backup_b2_bucket: ${jsonencode(mail_backup.b2_bucket)}
+              mail_backup_b2_endpoint: ${jsonencode(mail_backup.b2_endpoint)}
+              mail_backup_b2_region: ${jsonencode(mail_backup.b2_region)}
+              mail_backup_scaleway_bucket: ${jsonencode(mail_backup.scaleway_bucket)}
+              mail_backup_scaleway_endpoint: ${jsonencode(mail_backup.scaleway_endpoint)}
+              mail_backup_scaleway_region: ${jsonencode(mail_backup.scaleway_region)}
 %{ if length(non_mail_nodes) > 0 ~}
       hosts:
 %{ for key in sort(keys(non_mail_nodes)) ~}

@@ -10,6 +10,33 @@ make apply
 make inventory
 ```
 
+The remote S3 backend is the single authoritative state. `make apply`
+automatically writes a timestamped SOPS/age-encrypted recovery snapshot to the
+git-ignored `OpenTofu/state-snapshots/` directory immediately after the
+OpenTofu apply succeeds and before generated credentials are synchronized. A
+credential-synchronization failure therefore still leaves a current recovery
+snapshot. Run the snapshot explicitly after a manual import or direct state
+operation:
+
+```bash
+make tofu-state-snapshot
+```
+
+The local files are immutable recovery inputs rather than a second backend, so
+there is no split-brain synchronization path. They contain state secrets and
+must remain encrypted. To restore one after confirmed loss of the remote
+state, first recreate and initialize the empty backend, then restore one exact
+reviewed snapshot through the pipe-only restore target:
+
+```bash
+make tofu-state-restore \
+  TOFU_STATE_SNAPSHOT=OpenTofu/state-snapshots/infrastructure-<timestamp>.sops.json
+```
+
+The target accepts only regular files inside the dedicated snapshot directory,
+validates full SOPS encryption before decryption, validates the state envelope,
+and does not use OpenTofu's destructive `-force` option.
+
 Re-run Ansible after changes to container pins, Quadlets, support files, or
 mail secrets:
 
@@ -58,10 +85,13 @@ replacing its ACME account, or creating a new automatic DKIM selector:
 make stalwart-bootstrap
 ```
 
-It temporarily enables the loopback management listener, synchronizes the
-exact current DKIM selectors into the ignored generated OpenTofu variables,
-reconciles production DNS-01 ACME, uses staging only if no managed Domain
-existed when the run began, verifies public trust, and
+It temporarily publishes loopback-only recovery access, using Stalwart's
+hostname-validated TLS listener when already enrolled and its initial HTTP
+listener only during first enrollment. It synchronizes the exact current DKIM
+selectors against the reviewed OpenTofu authority file,
+reconciles production DNS-01 ACME, and resumes staging whenever the managed
+Domain carries the persistent `staged enrollment pending` marker. It verifies
+public trust and
 always restores the production Quadlet. It uses an ephemeral recovery
 credential and does not store it.
 
@@ -108,8 +138,7 @@ sudo /usr/lib/systemd/system-generators/podman-system-generator --dryrun
 Check DNS and OpenTofu's declared identity:
 
 ```bash
-tofu -chdir=OpenTofu output dns_records
-tofu -chdir=OpenTofu output mail_dns
+make tofu-output
 dig A MAIL_HOSTNAME
 dig AAAA MAIL_HOSTNAME
 dig -x SERVER_ADDRESS
@@ -154,8 +183,8 @@ the adjacent release comment when reviewing a change.
 
 OpenTofu providers are constrained in `OpenTofu/versions.tf` and fully hashed
 in `OpenTofu/.terraform.lock.hcl`. Review provider changelogs, run
-`tofu -chdir=OpenTofu init -upgrade` intentionally, inspect the lockfile diff,
-and validate a saved plan before applying.
+`make tofu-upgrade` intentionally, inspect the lockfile diff, and validate a
+saved plan before applying.
 
 ## gVisor Updates
 
@@ -167,7 +196,8 @@ sidecars in separate passes. This keeps the service's
 `openat2` incompatibility with that restriction on FCOS.
 The installer verifies the archive and every expected executable. The direct
 FCOS controller then runs `runsc --version` after boot, outside the install
-unit's intentionally PID-only `/proc`, before marking the node installed.
+unit's intentionally PID-only `/proc`, before a strict permanent-host-key
+verification marks the node installed.
 
 To update it:
 
@@ -261,11 +291,12 @@ make sops-mail-edit
 Then run `make deploy`. Ansible stops dependent services, replaces the Podman
 secret, records only its SHA-256 hash, and restarts the stack.
 
-Changing `MAIL_POSTGRES_PASSWORD` is not, by itself, a complete PostgreSQL
-credential rotation. The official PostgreSQL image applies
-`POSTGRES_PASSWORD` only while initializing an empty data directory. Coordinate
-an explicit database-role password change with the SOPS update and Stalwart
-restart; otherwise Stalwart will lose database access.
+The PostgreSQL start gate reconciles the distinct
+`MAIL_POSTGRES_ADMIN_PASSWORD`, `MAIL_POSTGRES_PASSWORD`, and
+`MAIL_POSTGRES_DUMP_PASSWORD` values on every container start. Rotate one or
+more values together in SOPS and run `make deploy`; Stalwart starts only after
+the administrator, non-superuser application, and read-only dump roles have
+the declared passwords and privilege flags.
 
 The Stalwart deSEC token is created by OpenTofu. When it is deliberately
 replaced, apply the reviewed infrastructure plan and let `make apply` sync the
@@ -281,22 +312,102 @@ egress CIDRs.
 
 ## Backups and Recovery
 
-Hetzner backups are enabled by default, but a virtual-machine snapshot is not a
-substitute for an application-consistent PostgreSQL backup. The repository does
-not currently automate `pg_dump`, off-site retention, restore testing, or
-Stalwart data export.
+Keep `mail_backup_storage_enabled = true` for the lifetime of retained backup
+data. `mail_backup_enabled` independently controls runtime policies,
+credentials, inventory, secrets, and schedules. Setting only the runtime flag
+false pauses backups and revokes runtime access without planning destruction of
+the protected buckets.
 
-Before production use, define and test:
+When both flags are true, the mail host maintains three independent,
+application-consistent PostgreSQL copies:
 
-- encrypted, off-host PostgreSQL backups;
-- backup coverage for the Stalwart named volume;
-- OpenTofu state backup or an encrypted remote backend;
-- secure backup of the age private identity;
-- recovery of `Ansible/inventory/known_hosts` after a verified rebuild;
-- restore procedures and recovery-time objectives.
+| Copy | Schedule | Encryption | Retention boundary |
+| --- | --- | --- | --- |
+| Hetzner Object Storage | Physical pgBackRest plus daily signed logical archive | Independent pgBackRest encryption; age + Ed25519 for logical archives | Versioned mutable hot bucket in a dedicated project with one shared credential pair |
+| Backblaze B2 | Physical pgBackRest plus daily signed logical archive | Independent pgBackRest encryption; age + Ed25519 for logical archives | Separate prefix-confined keys; signed writer cannot list or read archives |
+| Scaleway Object Storage/Glacier (Paris) | Daily signed logical archive | Streaming age encryption plus Ed25519 manifest signature | Compliance object lock, versioning, Glacier transition after 90 days, expiry after the declared retention period |
 
-Never copy PostgreSQL's live volume as though it were a consistent database
-backup. Use PostgreSQL-aware backup and restore tooling.
+The generated Scaleway runtime API key expires and rotates annually to satisfy
+the organization security policy. A plan that replaces this key must be
+applied immediately before `make inventory && make deploy`: `make apply`
+synchronizes the new one-time secret into SOPS, and deployment installs it on
+the mail host. Do not leave a completed key-rotation apply undeployed.
+
+Within an active Scaleway account, compliance retention cannot be bypassed by
+the runtime identity, OpenTofu credentials, or organization administrators.
+Locked objects cannot be deleted and their retention cannot be shortened before
+the declared period expires; lifecycle expiry becomes effective only after that
+boundary. Scaleway documents deletion of the entire account as the exceptional
+way to remove retained objects early.
+
+The 05:00 UTC check timer validates both pgBackRest repositories and WAL
+archiving. All timers are persistent and use a stable randomized delay. A
+shared host-kernel lock queues physical, logical, and check operations for up
+to six hours and fails visibly on timeout. The host holds that lock across the
+complete gVisor logical job. The logical path never creates a plaintext dump:
+the no-egress signer streams `pg_dump` through age, signs a manifest binding
+the digest, size, and all three destinations, and a separate uploader verifies
+that signature before publishing it last as the restore commit marker. Failed
+creation removes its incomplete active files; structurally invalid or tampered
+staging is moved under the protected `failed/` quarantine so a later scheduled
+backup can proceed without discarding the evidence.
+
+This split prevents an uploader-only compromise from forging a manifest, but
+the trusted host runner automatically publishes valid signer output. Treat a
+signer compromise as authority to inject candidates, and select a retained
+object version from before the incident cutoff during recovery.
+
+Inspect the schedule and most recent results on the mail host:
+
+```bash
+sudo systemctl list-timers 'mail-pgbackrest-*' mail-backup-logical.timer
+sudo systemctl status mail-pgbackrest-init.service
+sudo journalctl -u 'mail-pgbackrest-*' -u mail-backup-logical-run.service --since '7 days ago'
+sudo systemctl start mail-pgbackrest-check.service
+sudo podman exec --user 70 mail-postgres \
+  pgbackrest --stanza=stalwart --repo=1 info
+sudo podman exec --user 70 mail-postgres \
+  pgbackrest --stanza=stalwart --repo=2 info
+```
+
+Create an additional reviewed backup without changing the schedule:
+
+```bash
+sudo systemctl start mail-pgbackrest-backup@full.service
+sudo systemctl start mail-backup-logical-run.service
+```
+
+`expire-auto=n` keeps retention changes operator-controlled. The Hetzner host
+credential can modify or delete that dedicated hot bucket, while the generated
+B2 runtime keys cannot delete objects. Versioning can preserve older hot
+versions, but a compromised writer can still disrupt direct PITR. Treat both
+hot repositories as availability copies, not immutable history; the signed
+logical archives in Scaleway Compliance storage are the ransomware-resistant
+recovery boundary. Perform reviewed pgBackRest expiry at least monthly using
+the Hetzner credential and a temporary delete-capable B2 credential, confirm a
+recent full backup remains in each repository, then revoke the temporary B2
+authority.
+
+The declarative Stalwart configuration is in Git and its authoritative config,
+blob, lookup, and data store is PostgreSQL. The `mail-stalwart-data` volume is
+therefore not a separate backup source. Treat a future storage-backend change
+as a backup-boundary change and expand coverage before deploying it.
+
+Run quarterly restore drills into an isolated PostgreSQL instance. For each hot
+repository, restore to a fresh data directory with the matching pgBackRest
+cipher passphrase and versions selected from before the drill's compromise
+cutoff, replay to a recorded timestamp, start PostgreSQL without
+Stalwart network exposure, and verify account, mailbox, blob, and configuration
+counts. For any signed logical copy, download the ciphertext plus
+`.manifest.json` and `.manifest.sig`, verify the Ed25519 signature and manifest
+SHA-256/size with `Scripts/verify-logical-backup.sh` before decrypting, then stream it through `age --decrypt`, inspect
+it with `pg_restore --list`, and restore into an empty database. Request Glacier
+restoration first for Scaleway. Ignore any archive without a valid signature
+commit marker. Never test a restore over the production volume.
+
+The age recovery identity and both pgBackRest passphrases must have tested
+offline copies. Losing a passphrase makes that repository unrecoverable. Also
+verify recovery of `Ansible/inventory/known_hosts` after a host rebuild.
 
 ## Rebuilds
 

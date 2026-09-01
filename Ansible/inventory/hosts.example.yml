@@ -9,6 +9,7 @@ all:
               ansible_host: "mail.example.com"
               node_key: "01"
               mail_hostname: "mail.example.com"
+              mail_backup_enabled: false
       hosts:
         worker-01:
           ansible_host: "worker.example.com"

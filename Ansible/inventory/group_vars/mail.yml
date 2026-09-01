@@ -1,37 +1,215 @@
 ---
+mail_postgres_admin_password: "{{ lookup('ansible.builtin.env', 'MAIL_POSTGRES_ADMIN_PASSWORD') }}"
 mail_postgres_password: "{{ lookup('ansible.builtin.env', 'MAIL_POSTGRES_PASSWORD') }}"
+mail_postgres_dump_password: "{{ lookup('ansible.builtin.env', 'MAIL_POSTGRES_DUMP_PASSWORD') }}"
 stalwart_desec_api_token: "{{ lookup('ansible.builtin.env', 'STALWART_DESEC_API_TOKEN') }}"
 mail_container_images: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../compose.yaml') | from_yaml }}"
 mail_postgres_image: "{{ mail_container_images.services.postgres.image }}"
+mail_postgres_backup_image: >-
+  {{ lookup('ansible.builtin.pipe',
+            (inventory_dir ~ '/../../Scripts/mail-postgres-backup-image-ref.py') | quote) }}
 mail_stalwart_image: "{{ mail_container_images.services.stalwart.image }}"
 mail_stalwart_bootstrap_listener: false
+mail_stalwart_bootstrap_tls: false
 mail_stalwart_bootstrap_secret_name: "{{ lookup('ansible.builtin.env', 'STALWART_BOOTSTRAP_SECRET_NAME') }}"
 mail_stalwart_webui_url: "https://github.com/stalwartlabs/webui/releases/download/v1.0.8/webui.zip"
 mail_stalwart_webui_sha256: "a3904b571aacca815eee2c38dd86de510d53304babe50b9576760bf70a36c0bf"
 mail_stalwart_webui_host_path: "/var/lib/stalwart-webui/webui.zip"
 mail_stalwart_webui_container_path: "/opt/stalwart-webui/webui.zip"
+quadlet_directory: "/etc/containers/systemd"
 
-quadlet_secrets:
+mail_backup_is_enabled: "{{ mail_backup_enabled | default(false) | bool }}"
+mail_pgbackrest_repo1_cipher_pass: "{{ lookup('ansible.builtin.env', 'PGBACKREST_REPO1_CIPHER_PASS') }}"
+mail_pgbackrest_repo2_s3_key: "{{ lookup('ansible.builtin.env', 'PGBACKREST_REPO2_S3_KEY') }}"
+mail_pgbackrest_repo2_s3_key_secret: "{{ lookup('ansible.builtin.env', 'PGBACKREST_REPO2_S3_KEY_SECRET') }}"
+mail_pgbackrest_repo2_cipher_pass: "{{ lookup('ansible.builtin.env', 'PGBACKREST_REPO2_CIPHER_PASS') }}"
+mail_backup_scaleway_access_key: "{{ lookup('ansible.builtin.env', 'MAIL_BACKUP_SCALEWAY_ACCESS_KEY') }}"
+mail_backup_scaleway_secret_key: "{{ lookup('ansible.builtin.env', 'MAIL_BACKUP_SCALEWAY_SECRET_KEY') }}"
+mail_backup_hetzner_access_key: "{{ lookup('ansible.builtin.env', 'MAIL_BACKUP_HETZNER_ACCESS_KEY') }}"
+mail_backup_hetzner_secret_key: "{{ lookup('ansible.builtin.env', 'MAIL_BACKUP_HETZNER_SECRET_KEY') }}"
+mail_backup_b2_access_key: "{{ lookup('ansible.builtin.env', 'MAIL_BACKUP_B2_ACCESS_KEY') }}"
+mail_backup_b2_secret_key: "{{ lookup('ansible.builtin.env', 'MAIL_BACKUP_B2_SECRET_KEY') }}"
+mail_backup_signing_private_key: "{{ lookup('ansible.builtin.env', 'MAIL_BACKUP_SIGNING_PRIVATE_KEY') }}"
+mail_backup_signing_public_key: "{{ lookup('ansible.builtin.env', 'MAIL_BACKUP_SIGNING_PUBLIC_KEY') }}"
+
+mail_base_quadlet_secrets:
+  - name: "mail-postgres-admin-password"
+    value: "{{ mail_postgres_admin_password }}"
+    min_length: 32
+    services:
+      - "mail-postgres.service"
   - name: "mail-postgres-password"
     value: "{{ mail_postgres_password }}"
     min_length: 32
     services:
       - "mail-stalwart.service"
       - "mail-postgres.service"
+  - name: "mail-postgres-dump-password"
+    value: "{{ mail_postgres_dump_password }}"
+    min_length: 32
+    services: >-
+      {{ ['mail-postgres.service'] +
+         (['mail-backup-logical-job.service'] if mail_backup_is_enabled | bool else []) }}
   - name: "stalwart-desec-api-token"
     value: "{{ stalwart_desec_api_token }}"
     min_length: 16
     services:
       - "mail-stalwart.service"
 
-quadlet_support_files:
+mail_backup_quadlet_secrets:
+  - name: "mail-pgbackrest-repo1-cipher-pass"
+    value: "{{ mail_pgbackrest_repo1_cipher_pass }}"
+    min_length: 32
+    services:
+      - "mail-postgres.service"
+  - name: "mail-pgbackrest-repo2-s3-key"
+    value: "{{ mail_pgbackrest_repo2_s3_key }}"
+    min_length: 16
+    services:
+      - "mail-postgres.service"
+  - name: "mail-pgbackrest-repo2-s3-key-secret"
+    value: "{{ mail_pgbackrest_repo2_s3_key_secret }}"
+    # Backblaze generates this opaque value; current standard keys can be 27
+    # characters, so validate presence without imposing a password policy.
+    min_length: 16
+    services:
+      - "mail-postgres.service"
+  - name: "mail-pgbackrest-repo2-cipher-pass"
+    value: "{{ mail_pgbackrest_repo2_cipher_pass }}"
+    min_length: 32
+    services:
+      - "mail-postgres.service"
+  - name: "mail-backup-scaleway-access-key"
+    value: "{{ mail_backup_scaleway_access_key }}"
+    min_length: 16
+    services:
+      - "mail-backup-logical-upload.service"
+  - name: "mail-backup-scaleway-secret-key"
+    value: "{{ mail_backup_scaleway_secret_key }}"
+    min_length: 32
+    services:
+      - "mail-backup-logical-upload.service"
+  - name: "mail-backup-hetzner-access-key"
+    value: "{{ mail_backup_hetzner_access_key }}"
+    min_length: 16
+    services:
+      - "mail-postgres.service"
+      - "mail-backup-logical-upload.service"
+  - name: "mail-backup-hetzner-secret-key"
+    value: "{{ mail_backup_hetzner_secret_key }}"
+    min_length: 16
+    services:
+      - "mail-postgres.service"
+      - "mail-backup-logical-upload.service"
+  - name: "mail-backup-b2-access-key"
+    value: "{{ mail_backup_b2_access_key }}"
+    min_length: 16
+    services:
+      - "mail-backup-logical-upload.service"
+  - name: "mail-backup-b2-secret-key"
+    value: "{{ mail_backup_b2_secret_key }}"
+    min_length: 16
+    services:
+      - "mail-backup-logical-upload.service"
+  - name: "mail-backup-signing-private-key"
+    value: "{{ mail_backup_signing_private_key }}"
+    min_length: 80
+    services:
+      - "mail-backup-logical-job.service"
+  - name: "mail-backup-signing-public-key"
+    value: "{{ mail_backup_signing_public_key }}"
+    min_length: 80
+    services:
+      - "mail-backup-logical-job.service"
+      - "mail-backup-logical-upload.service"
+
+quadlet_secrets: >-
+  {{ mail_base_quadlet_secrets +
+     (mail_backup_quadlet_secrets if mail_backup_is_enabled | bool else []) }}
+
+mail_retired_quadlet_secrets:
+  - name: "mail-pgbackrest-repo1-s3-key"
+    services:
+      - "mail-postgres.service"
+  - name: "mail-pgbackrest-repo1-s3-key-secret"
+    services:
+      - "mail-postgres.service"
+
+quadlet_absent_secrets: >-
+  {{ mail_retired_quadlet_secrets + ([] if mail_backup_is_enabled | bool else [
+    {'name': 'mail-pgbackrest-repo1-cipher-pass', 'services': ['mail-postgres.service']},
+    {'name': 'mail-pgbackrest-repo2-s3-key', 'services': ['mail-postgres.service']},
+    {'name': 'mail-pgbackrest-repo2-s3-key-secret', 'services': ['mail-postgres.service']},
+    {'name': 'mail-pgbackrest-repo2-cipher-pass', 'services': ['mail-postgres.service']},
+    {'name': 'mail-backup-scaleway-access-key'},
+    {'name': 'mail-backup-scaleway-secret-key'},
+    {'name': 'mail-backup-hetzner-access-key'},
+    {'name': 'mail-backup-hetzner-secret-key'},
+    {'name': 'mail-backup-b2-access-key'},
+    {'name': 'mail-backup-b2-secret-key'},
+    {'name': 'mail-backup-signing-private-key'},
+    {'name': 'mail-backup-signing-public-key'}
+  ]) }}
+
+mail_base_quadlet_support_files:
   - name: "stalwart-config.json"
     mode: "0644"
     services:
       - "mail-stalwart.service"
     content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/stalwart-config.json.j2') }}"
+  - name: "mail-postgres-roles.sh"
+    mode: "0755"
+    services: >-
+      {{ ['mail-stalwart.service', 'mail-postgres.service'] +
+         (['mail-backup-logical-job.service'] if mail_backup_is_enabled | bool else []) }}
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-postgres-roles.sh.j2') }}"
 
-quadlet_units:
+mail_backup_quadlet_support_files:
+  - name: "pgbackrest.conf"
+    mode: "0644"
+    services:
+      - "mail-stalwart.service"
+      - "mail-postgres.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/pgbackrest.conf.j2') }}"
+  - name: "postgresql-backup.conf"
+    mode: "0644"
+    services:
+      - "mail-stalwart.service"
+      - "mail-postgres.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/postgresql-backup.conf.j2') }}"
+  - name: "mail-backup-lock.sh"
+    mode: "0755"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-backup-lock.sh.j2') }}"
+  - name: "mail-pgbackrest.sh"
+    mode: "0755"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-pgbackrest.sh.j2') }}"
+  - name: "mail-backup-run.sh"
+    mode: "0755"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-backup-run.sh.j2') }}"
+  - name: "mail-backup-logical.sh"
+    mode: "0755"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-backup-logical.sh.j2') }}"
+  - name: "mail-backup-upload.sh"
+    mode: "0755"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-backup-upload.sh.j2') }}"
+
+quadlet_support_files: >-
+  {{ mail_base_quadlet_support_files +
+     (mail_backup_quadlet_support_files if mail_backup_is_enabled | bool else []) }}
+
+quadlet_absent_support_files: >-
+  {{ [{'name': 'mail-postgres.Containerfile', 'services': ['mail-stalwart.service', 'mail-postgres.service']}] +
+     ([] if mail_backup_is_enabled | bool else [
+    {'name': 'pgbackrest.conf', 'services': ['mail-stalwart.service', 'mail-postgres.service']},
+    {'name': 'postgresql-backup.conf', 'services': ['mail-stalwart.service', 'mail-postgres.service']},
+    {'name': 'mail-backup-lock.sh'},
+    {'name': 'mail-pgbackrest.sh'},
+    {'name': 'mail-backup-run.sh'},
+    {'name': 'mail-backup-logical.sh'},
+    {'name': 'mail-backup-upload.sh'}
+  ]) }}
+
+mail_base_quadlet_units:
   - name: "mail-dualstack.network"
     service: "mail-dualstack-network.service"
     services:
@@ -66,8 +244,109 @@ quadlet_units:
     mode: "0644"
     content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-stalwart.container.j2') }}"
 
+mail_backup_quadlet_units:
+  - name: "mail-backup-egress.network"
+    service: "mail-backup-egress-network.service"
+    services:
+      - "mail-stalwart.service"
+      - "mail-postgres.service"
+      - "mail-backup-logical-job.service"
+      - "mail-backup-logical-upload.service"
+      - "mail-backup-egress-network.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-backup-egress.network.j2') }}"
+  - name: "mail-pgbackrest-state.volume"
+    services:
+      - "mail-postgres.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-pgbackrest-state.volume.j2') }}"
+  - name: "mail-backup-staging.volume"
+    services:
+      - "mail-backup-logical-job.service"
+      - "mail-backup-logical-upload.service"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-backup-staging.volume.j2') }}"
+  - name: "mail-backup-logical-job.container"
+    service: "mail-backup-logical-job.service"
+    services:
+      - "mail-backup-logical-job.service"
+    state: "none"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-backup-logical.container.j2') }}"
+  - name: "mail-backup-logical-upload.container"
+    service: "mail-backup-logical-upload.service"
+    services:
+      - "mail-backup-logical-upload.service"
+    state: "none"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-backup-logical-upload.container.j2') }}"
+
+quadlet_units: >-
+  {{ mail_base_quadlet_units +
+     (mail_backup_quadlet_units if mail_backup_is_enabled | bool else []) }}
+
 # Deletions are always explicit. Add both the source filename and generated
-# service name here when retiring a unit.
-quadlet_absent_units:
-  - name: "mail.network"
-    service: "mail-network.service"
+# service name here while retiring a unit, then remove the entry after every
+# managed host has reconciled it. Do not declare a backup Quadlet as both
+# desired and absent.
+quadlet_absent_units: >-
+  {{ [{'name': 'mail-postgres.build'}] + ([
+       {
+         'name': 'mail-backup-egress.network',
+         'service': 'mail-backup-egress-network.service',
+         'services': ['mail-stalwart.service', 'mail-postgres.service', 'mail-backup-logical-job.service', 'mail-backup-logical-upload.service']
+       },
+       {'name': 'mail-pgbackrest-state.volume'},
+       {'name': 'mail-backup-staging.volume'},
+       {'name': 'mail-backup-logical-job.container', 'service': 'mail-backup-logical-job.service'},
+       {'name': 'mail-backup-logical-upload.container', 'service': 'mail-backup-logical-upload.service'}
+     ] if not mail_backup_is_enabled | bool else []) }}
+
+mail_backup_systemd_units:
+  - name: "mail-backup-lock.service"
+    enabled: true
+    state: "started"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../systemd/mail-backup-lock.service.j2') }}"
+  - name: "mail-pgbackrest-init.service"
+    enabled: true
+    state: "started"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../systemd/mail-pgbackrest-init.service.j2') }}"
+  - name: "mail-pgbackrest-backup@.service"
+    enabled: false
+    state: "none"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../systemd/mail-pgbackrest-backup.service.j2') }}"
+  - name: "mail-pgbackrest-full.timer"
+    enabled: true
+    state: "started"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../systemd/mail-pgbackrest-full.timer.j2') }}"
+  - name: "mail-pgbackrest-diff.timer"
+    enabled: true
+    state: "started"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../systemd/mail-pgbackrest-diff.timer.j2') }}"
+  - name: "mail-pgbackrest-check.service"
+    enabled: false
+    state: "none"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../systemd/mail-pgbackrest-check.service.j2') }}"
+  - name: "mail-pgbackrest-check.timer"
+    enabled: true
+    state: "started"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../systemd/mail-pgbackrest-check.timer.j2') }}"
+  - name: "mail-backup-logical.timer"
+    enabled: true
+    state: "started"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../systemd/mail-backup-logical.timer.j2') }}"
+  - name: "mail-backup-logical-run.service"
+    enabled: false
+    state: "none"
+    content: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../systemd/mail-backup-logical-run.service.j2') }}"
+
+systemd_unit_units: "{{ mail_backup_systemd_units if mail_backup_is_enabled | bool else [] }}"
+systemd_unit_absent_units: >-
+  {{ [] if mail_backup_is_enabled | bool else [
+    'mail-pgbackrest-full.timer',
+    'mail-pgbackrest-diff.timer',
+    'mail-pgbackrest-check.timer',
+    'mail-backup-logical.timer',
+    'mail-pgbackrest-backup@full.service',
+    'mail-pgbackrest-backup@diff.service',
+    'mail-pgbackrest-check.service',
+    'mail-backup-logical-run.service',
+    'mail-pgbackrest-backup@.service',
+    'mail-pgbackrest-init.service',
+    'mail-backup-lock.service'
+  ] }}

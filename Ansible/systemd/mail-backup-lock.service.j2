@@ -1,0 +1,18 @@
+[Unit]
+Description=Create the shared mail-backup operation lock
+# Restart setup when its managed implementation changes.
+# script-sha256={{ lookup('ansible.builtin.template', playbook_dir ~ '/../quadlets/mail-backup-lock.sh.j2') | hash('sha256') }}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ quadlet_directory }}/mail-backup-lock.sh
+StateDirectory=mail-backup
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

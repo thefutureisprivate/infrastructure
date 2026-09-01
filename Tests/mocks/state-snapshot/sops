@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ $* == *'encrypt'* ]]
+[[ $* == *'--filename-override infrastructure.sops.yaml'* ]]
+[[ $* == *'--input-type json'* ]]
+[[ $* == *'--output-type json'* ]]
+[[ $* == *'--encrypted-regex .*'* ]]
+
+jq '
+  def encrypt_scalars:
+    if type == "object" then
+      with_entries(.value |= encrypt_scalars)
+    elif type == "array" then
+      map(encrypt_scalars)
+    elif type == "string" and length == 0 then
+      .
+    elif type == "null" then
+      .
+    else
+      "ENC[AES256_GCM,data:test,iv:test,tag:test,type:str]"
+    end;
+  encrypt_scalars
+  + {
+      sops: {
+        age: [{recipient: "age1test", enc: "test"}],
+        encrypted_regex: ".*",
+        mac: "ENC[AES256_GCM,data:test,iv:test,tag:test,type:str]",
+        unencrypted_suffix: null,
+        version: "test"
+      }
+    }
+'
+exit "${MOCK_SOPS_EXIT:-0}"

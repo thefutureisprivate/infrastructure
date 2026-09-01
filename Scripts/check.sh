@@ -12,8 +12,17 @@ bash -n "${repo_root}/Tests/ansible/mocks/podman" "${repo_root}/Tests/ansible/mo
 printf 'Shell syntax: OK\n'
 
 "${repo_root}/Tests/sops-allowlist.sh"
+"${repo_root}/Tests/sops-sync-backup-credentials.sh"
+"${repo_root}/Tests/tofu-wrapper-environment.sh"
+"${repo_root}/Tests/tofu-state-snapshot.sh"
+"${repo_root}/Tests/tofu-state-restore.sh"
+TOFU="${tofu_bin}" "${repo_root}/Tests/tofu-mail-backup-flags.sh"
+"${repo_root}/Tests/inventory-normalizer.sh"
+"${repo_root}/Tests/mail-postgres-passwords.sh"
+"${repo_root}/Tests/postgres-roles.sh"
 "${repo_root}/Tests/fcos-rescue-installer.sh"
 "${repo_root}/Tests/stalwart-bootstrap.sh"
+"${repo_root}/Tests/mail-backups.sh"
 
 bash "${repo_root}/Scripts/check-stalwart-hardening-plan.sh"
 jq -e -s '
@@ -28,9 +37,9 @@ grep -Fq -- '--env "STALWART_URL=${STALWART_URL}"' \
   "${repo_root}/Scripts/stalwart-hardening.sh"
 grep -Fq -- 'type=env,target=STALWART_TOKEN' \
   "${repo_root}/Scripts/stalwart-hardening.sh"
-grep -Fq -- 'container_engine podman secret create "${runtime_token_secret}" -' \
+grep -Fq -- 'stalwart_podman secret create "${runtime_token_secret}" -' \
   "${repo_root}/Scripts/stalwart-hardening.sh"
-grep -Fq -- 'container_engine podman secret rm "${runtime_token_secret}"' \
+grep -Fq -- 'stalwart_podman secret rm "${runtime_token_secret}"' \
   "${repo_root}/Scripts/stalwart-hardening.sh"
 grep -Fq -- 'walk(if type == "object" and .match? == {} then del(.match) else . end);' \
   "${repo_root}/Scripts/stalwart-hardening.sh"
@@ -66,8 +75,12 @@ python3 "${repo_root}/Tests/verify-resolved-ignition.py" "${repo_root}/build/fco
 printf 'Butane: OK\n'
 
 if command -v "${tofu_bin}" >/dev/null 2>&1; then
+  TOFU="${tofu_bin}" "${repo_root}/Tests/tofu-encryption.sh"
   "${tofu_bin}" -chdir="${repo_root}/OpenTofu" fmt -check -recursive
   if [[ -d "${repo_root}/OpenTofu/.terraform" ]]; then
+    # `validate` checks configuration and provider schemas without reading or
+    # writing state. The separate encryption integration test above exercises
+    # fail-closed plaintext rejection and enforced ciphertext.
     "${tofu_bin}" -chdir="${repo_root}/OpenTofu" validate
   else
     printf 'OpenTofu validate: skipped (run make tofu-init first)\n'
