@@ -5,4 +5,4 @@ services:
   butane:
     image: "quay.io/coreos/butane:v2.27.0@sha256:d264fba5a02ec7a5525b7cd4ab04090e8c70d0ee42a74a90a0e2f89633ae720c"
   coreos-installer:
-    image: "quay.io/coreos/coreos-installer:v0.26.0@sha256:2c94387e76ae351a4183f29707fd7be57a9290675524391bdb17b40de1e088ff"
+    image: "quay.io/coreos/coreos-installer:v0.27.0@sha256:b914e5c2571992f5667c908941cbaf64ab39e96ff258b42fd75bdaf1ba6b96ba"
