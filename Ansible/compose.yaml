@@ -6,4 +6,4 @@ services:
   stalwart:
     image: "docker.io/stalwartlabs/stalwart:v0.16.24-alpine@sha256:dcff88258bf65d29ab9fc424d1006c9bda7290577151488adf2a47718d736977"
   stalwart-cli:
-    image: "docker.io/stalwartlabs/cli:1.0.12@sha256:fe199affac1d120a8c200ef39ae629765a2976270e0453575c1caf906ee15b52"
+    image: "docker.io/stalwartlabs/cli:1.0.13@sha256:9a1e07307d6f890a193322c4b737fc0868405f0f8486a19922cbf362f43884fd"
