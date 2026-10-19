@@ -4,6 +4,6 @@ services:
   postgres:
     image: "docker.io/library/postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
   stalwart:
-    image: "docker.io/stalwartlabs/stalwart:v0.16.25-alpine@sha256:0aa9cc1759fcaaf39d87bc0068bd8f6c75304948d971db819768eb5873a8d4b5"
+    image: "docker.io/stalwartlabs/stalwart:v0.16.26-alpine@sha256:3f6cfcd6ddae9a4ba1e2057e334bb2395c2c7ecceecfffc2bf639717b55b1478"
   stalwart-cli:
     image: "docker.io/stalwartlabs/cli:1.0.13@sha256:9a1e07307d6f890a193322c4b737fc0868405f0f8486a19922cbf362f43884fd"
