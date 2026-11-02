@@ -2,7 +2,7 @@
 # Dependency lockfile for the Quadlet images. Ansible, not Compose, deploys them.
 services:
   postgres:
-    image: "docker.io/library/postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
+    image: "docker.io/library/postgres:18.6-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5"
   stalwart:
     image: "docker.io/stalwartlabs/stalwart:v0.16.25-alpine@sha256:0aa9cc1759fcaaf39d87bc0068bd8f6c75304948d971db819768eb5873a8d4b5"
   stalwart-cli:
